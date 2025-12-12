@@ -87,71 +87,85 @@
         return data.filter(x => x.strike > 0);
     }
 
-    function renderHistogram() {
-        const data = getOptionData();
-        if (!data.length) return;
+function renderHistogram() {
+    const data = getOptionData();
+    if (!data.length) return;
 
-        const spotText = document.querySelector("#underlyingValue, .underlying")?.innerText || "";
-        const spot = parseFloat(spotText.replace(/[^\d.]/g, "")) || data[Math.floor(data.length / 2)].strike;
+    // Detect ATM
+    const spotText = document.querySelector("#underlyingValue, .underlying")?.innerText || "";
+    const spot = parseFloat(spotText.replace(/[^\d.]/g, "")) || data[Math.floor(data.length / 2)].strike;
 
-        const atmStrike = data.reduce((a, b) =>
-            Math.abs(a.strike - spot) < Math.abs(b.strike - spot) ? a : b
+    const atmStrike = data.reduce((a, b) =>
+        Math.abs(a.strike - spot) < Math.abs(b.strike - spot) ? a : b
+    );
+
+    let finalData = [...data];
+    if (keepATM) {
+        const mid = finalData.indexOf(atmStrike);
+        finalData = finalData.slice(
+            Math.max(0, mid - strikeCount),
+            Math.min(finalData.length, mid + strikeCount + 1)
         );
-
-        let finalData = [...data];
-        if (keepATM) {
-            const mid = finalData.indexOf(atmStrike);
-            finalData = finalData.slice(Math.max(0, mid - strikeCount), Math.min(finalData.length, mid + strikeCount + 1));
-        } else {
-            finalData = finalData.slice(0, strikeCount * 2);
-        }
-
-        const categories = [];
-        const ceOI = [], peOI = [], ceChg = [], peChg = [];
-
-        finalData.forEach(row => {
-            categories.push(`${row.strike} CE OI`);
-            categories.push(`${row.strike} PE OI`);
-            categories.push(`${row.strike} CE Chg`);
-            categories.push(`${row.strike} PE Chg`);
-
-            ceOI.push(row.ceOI);
-            peOI.push(row.peOI);
-            ceChg.push(row.ceChg);
-            peChg.push(row.peChg);
-        });
-
-        // Reset old chart before rendering new
-        document.querySelector("#oiChartContainer").innerHTML = "";
-
-        const options = {
-            series: [
-                { name: "CE OI", data: ceOI },
-                { name: "PE OI", data: peOI },
-                { name: "CE Chg", data: ceChg },
-                { name: "PE Chg", data: peChg }
-            ],
-            chart: {
-                type: "bar",
-                height: categories.length * 30,
-                animations: { enabled: false },
-                toolbar: { show: false }
-            },
-            colors: ["#ff3b30", "#34c759", "#ff9500", "#007aff"],
-            plotOptions: {
-                bar: { horizontal: true, barHeight: "60%" }
-            },
-            dataLabels: {
-                enabled: true,
-                style: { fontSize: "12px", colors: ["#fff"] }
-            },
-            xaxis: { categories },
-            yaxis: { labels: { style: { fontSize: "12px" } } }
-        };
-
-        chart = new ApexCharts(document.querySelector("#oiChartContainer"), options);
-        chart.render();
+    } else {
+        finalData = finalData.slice(0, strikeCount * 2);
     }
+
+    // Build single strike axis (strike appears once)
+    const strikes = finalData.map(x => x.strike);
+    const ceOI = finalData.map(x => x.ceOI);
+    const peOI = finalData.map(x => x.peOI);
+    const ceChg = finalData.map(x => x.ceChg);
+    const peChg = finalData.map(x => x.peChg);
+
+    // Reset old chart
+    document.querySelector("#oiChartContainer").innerHTML = "";
+
+    const options = {
+        series: [
+            { name: "CE OI", data: ceOI },
+            { name: "PE OI", data: peOI },
+            { name: "CE Chg", data: ceChg },
+            { name: "PE Chg", data: peChg }
+        ],
+        chart: {
+            type: "bar",
+            height: strikes.length * 60,    // 1 strike = 60px group
+            stacked: false,                 // group bars, not stack
+            animations: { enabled: false },
+            toolbar: { show: false }
+        },
+        plotOptions: {
+            bar: {
+                horizontal: true,
+                barHeight: "70%",
+                rangeBarOverlap: false,
+                rangeBarGroupRows: true       // 👉 makes CE+PE+CEchg+PEchg grouped
+            }
+        },
+        colors: ["#ff3b30", "#34c759", "#ff9500", "#0060ff"],
+        dataLabels: {
+            enabled: true,
+            formatter: (val) => val.toLocaleString(),
+            style: { fontSize: "12px", colors: ["#000"] }
+        },
+        xaxis: {
+            categories: strikes,
+            labels: { style: { fontSize: "13px" } }
+        },
+        yaxis: {
+            labels: { style: { fontSize: "14px", fontWeight: 600 } }
+        },
+        legend: {
+            position: "top",
+            fontSize: "14px"
+        },
+        grid: { strokeDashArray: 4 }
+    };
+
+    chart = new ApexCharts(document.querySelector("#oiChartContainer"), options);
+    chart.render();
+}
+
 
     waitForTable(() => {
         renderHistogram();
