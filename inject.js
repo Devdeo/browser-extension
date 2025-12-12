@@ -67,11 +67,11 @@
             if (c.length < 21) return;  // ensure row fully exists
 
             data.push({
-                ceOI:  parseNumber(c[0].innerText),   // Calls OI
-                ceChg: parseNumber(c[1].innerText),   // Calls Chng in OI
-                strike: parseNumber(c[10].innerText), // Strike price
-                peChg: parseNumber(c[19].innerText),  // Puts Chng in OI
-                peOI:  parseNumber(c[20].innerText)   // Puts OI
+                ceOI:  parseNumber(c[1].innerText),   // Calls OI
+                ceChg: parseNumber(c[2].innerText),   // Calls Chng in OI
+                strike: parseNumber(c[11].innerText), // Strike price
+                peChg: parseNumber(c[20].innerText),  // Puts Chng in OI
+                peOI:  parseNumber(c[21].innerText)   // Puts OI
             });
         });
 
