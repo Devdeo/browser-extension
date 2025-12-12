@@ -1,63 +1,53 @@
-#oi-box {
+#oiHistogramPanel {
     position: fixed;
-    top: 80px;
+    top: 70px;
     left: 10px;
-    width: 300px;
-    z-index: 9999999;
-    background: #fff;
-    border-radius: 14px;
-    box-shadow: 0 6px 20px rgba(0,0,0,0.25);
-    padding: 10px;
-    font-family: Arial, sans-serif;
-    touch-action: none;
+    width: 92%;
+    max-width: 420px;
+    background: #ffffff;
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+    z-index: 999999 !important;
+    padding: 12px;
+    font-family: sans-serif;
 }
 
-#oi-header {
-    background: #0A74FF;
-    color: white;
-    padding: 8px;
-    border-radius: 12px;
+#oiPanelHeader {
     display: flex;
     justify-content: space-between;
-    font-size: 15px;
-    cursor: move;
+    font-size: 20px;
+    font-weight: 700;
+    padding: 8px;
+    background: #0a73eb;
+    color: white;
+    border-radius: 12px;
 }
 
-.hist-row {
+#oiControls {
+    margin-top: 10px;
     display: flex;
     align-items: center;
-    padding: 3px 0;
+    gap: 12px;
 }
 
-.strike {
-    width: 60px;
-    font-weight: bold;
-    text-align: right;
-    padding-right: 4px;
+.oi-btn {
+    font-size: 22px;
+    border: 2px solid #333;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: white;
 }
 
-.bar {
-    height: 8px;
-    border-radius: 4px;
-    margin-left: 6px;
+#chartWrapper {
+    margin-top: 10px;
+    height: 70vh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    padding: 4px;
 }
 
-.ce {
-    background: red;
-}
-.pe {
-    background: green;
-}
-.ce-chg {
-    background: orange;
-}
-.pe-chg {
-    background: blue;
-}
-
-.val {
-    width: 60px;
-    font-size: 11px;
-    margin-left: 5px;
-    text-align: right;
+#oiChartContainer {
+    width: 100%;
 }
