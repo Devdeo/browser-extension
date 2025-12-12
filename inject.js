@@ -106,93 +106,130 @@
     // ⭐ FINAL NO-OVERLAP HISTOGRAM ⭐
     // --------------------------------------------------------------------
     function renderHistogram() {
-        const data = getOptionData();
-        if (!data.length) return;
+    const data = getOptionData();
+    if (!data.length) return;
 
-        const spotText = document.querySelector("#underlyingValue, .underlying")?.innerText || "";
-        const spot = parseFloat(spotText.replace(/[^\d.]/g, "")) || data[Math.floor(data.length / 2)].strike;
+    // ATM detection
+    const spotText = document.querySelector("#underlyingValue, .underlying")?.innerText || "";
+    const spot = parseFloat(spotText.replace(/[^\d.]/g, "")) || data[Math.floor(data.length / 2)].strike;
 
-        const atmStrike = data.reduce((a, b) =>
-            Math.abs(a.strike - spot) < Math.abs(b.strike - spot) ? a : b
+    const atmStrike = data.reduce((a, b) =>
+        Math.abs(a.strike - spot) < Math.abs(b.strike - spot) ? a : b
+    );
+
+    let finalData = [...data];
+    if (keepATM) {
+        const mid = finalData.indexOf(atmStrike);
+        finalData = finalData.slice(
+            Math.max(0, mid - strikeCount),
+            Math.min(finalData.length, mid + strikeCount + 1)
         );
-
-        let finalData = [...data];
-
-        if (keepATM) {
-            const mid = finalData.indexOf(atmStrike);
-            finalData = finalData.slice(
-                Math.max(0, mid - strikeCount),
-                Math.min(finalData.length, mid + strikeCount + 1)
-            );
-        } else {
-            finalData = finalData.slice(0, strikeCount * 2);
-        }
-
-        // ⭐ EXPAND STRIKES → 4 rows per strike to prevent overlap
-        const categories = [];
-        const ceOI = [], peOI = [], ceChg = [], peChg = [];
-
-        finalData.forEach(row => {
-            categories.push(String(row.strike));  // CE OI row shows strike
-            categories.push(" ");                 // PE OI row blank
-            categories.push(" ");                 // CE Chg row blank
-            categories.push(" ");                 // PE Chg row blank
-
-            ceOI.push(row.ceOI);
-            peOI.push(row.peOI);
-            ceChg.push(row.ceChg);
-            peChg.push(row.peChg);
-        });
-
-        document.querySelector("#oiChartContainer").innerHTML = "";
-
-        const options = {
-            series: [
-                { name: "CE OI", data: ceOI },
-                { name: "PE OI", data: peOI },
-                { name: "CE Chg", data: ceChg },
-                { name: "PE Chg", data: peChg }
-            ],
-
-            chart: {
-                type: "bar",
-                height: categories.length * 30,
-                stacked: false,
-                animations: { enabled: false },
-                toolbar: { show: false }
-            },
-
-            colors: ["#ff3b30", "#34c759", "#ff9500", "#0066ff"],
-
-            plotOptions: {
-                bar: {
-                    horizontal: true,
-                    barHeight: "45%",     // ⭐ prevents overlapping
-                    distributed: false
-                }
-            },
-
-            dataLabels: {
-                enabled: true,
-                formatter: (val) => val.toLocaleString(),
-                style: { fontSize: "11px", fontWeight: 600 }
-            },
-
-            xaxis: {
-                categories,
-                labels: { style: { fontSize: "14px", fontWeight: 700 } }
-            },
-
-            yaxis: {
-                labels: { style: { fontSize: "14px", fontWeight: 700 } }
-            },
-
-            legend: { position: "top", fontSize: "12px" }
-        };
-
-        chart = new ApexCharts(document.querySelector("#oiChartContainer"), options);
-        chart.render();
+    } else {
+        finalData = finalData.slice(0, strikeCount * 2);
     }
+
+    // =============================
+    // 4 ROWS PER STRIKE (no overlap)
+    // =============================
+    const categories = [];
+    const ceOI = [], peOI = [], ceChg = [], peChg = [];
+
+    finalData.forEach(row => {
+        categories.push(String(row.strike)); // big strike label
+        categories.push(" ");
+        categories.push(" ");
+        categories.push(" ");
+
+        ceOI.push(row.ceOI);
+        peOI.push(row.peOI);
+        ceChg.push(row.ceChg);
+        peChg.push(row.peChg);
+    });
+
+    document.querySelector("#oiChartContainer").innerHTML = "";
+
+    const options = {
+        series: [
+            { name: "CE OI", data: ceOI },
+            { name: "PE OI", data: peOI },
+            { name: "CE Chg", data: ceChg },
+            { name: "PE Chg", data: peChg }
+        ],
+
+        chart: {
+            type: "bar",
+            height: categories.length * 40,
+            stacked: false,
+            animations: { enabled: false },
+            toolbar: { show: false }
+        },
+
+        // =============================
+        // PERFECT VISUAL BAR SETTINGS
+        // =============================
+        plotOptions: {
+            bar: {
+                horizontal: true,
+                distributed: false,
+                barHeight: "65%",  // <<--- thicker bars
+                borderRadius: 3
+            }
+        },
+
+        colors: [
+            "#ff3b30",  // CE OI - bold red
+            "#2ecc71",  // PE OI - bright green
+            "#f1c40f",  // CE change - yellow
+            "#2980ff"   // PE change - blue
+        ],
+
+        dataLabels: {
+            enabled: true,
+            formatter: val => (val ? val.toLocaleString() : ""),
+            style: {
+                fontSize: "12px",
+                fontWeight: "700",
+                colors: ["#000"]
+            },
+            offsetX: 5
+        },
+
+        xaxis: {
+            categories,
+            labels: {
+                style: { fontSize: "14px", fontWeight: 700 }
+            },
+            tickAmount: 5,
+            decimalsInFloat: 0
+        },
+
+        yaxis: {
+            labels: {
+                style: { fontSize: "15px", fontWeight: 700 }
+            }
+        },
+
+        legend: {
+            position: "top",
+            horizontalAlign: "center",
+            fontSize: "14px",
+            markers: {
+                width: 16,
+                height: 16,
+                radius: 4
+            }
+        },
+
+        grid: {
+            borderColor: "#ddd",
+            strokeDashArray: 4,
+        }
+    };
+
+    chart = new ApexCharts(document.querySelector("#oiChartContainer"), options);
+    chart.render();
+}
+
 
     waitForTable(() => {
         renderHistogram();
