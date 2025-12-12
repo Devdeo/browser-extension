@@ -5,7 +5,7 @@
     window.__OI_HISTOGRAM_INIT__ = true;
 
     /* ============================================================
-       WAIT FOR OPTION CHAIN TABLE TO LOAD
+       WAIT UNTIL OPTION CHAIN TABLE EXISTS
     ============================================================ */
     function waitForTable(callback) {
         const check = setInterval(() => {
@@ -17,7 +17,7 @@
     }
 
     /* ============================================================
-       CREATE HISTOGRAM PANEL + MIN/MAX
+       MAIN PANEL UI (WITH MINIMIZE & MAXIMIZE)
     ============================================================ */
     function createPanel() {
         const panel = document.createElement("div");
@@ -68,7 +68,7 @@
         let minimized = false;
         let fullHeight = 500;
 
-        // Save height after render
+        // Save height after DOM paints
         setTimeout(() => {
             fullHeight = panel.offsetHeight;
         }, 300);
@@ -93,7 +93,7 @@
     createPanel();
 
     /* ============================================================
-       ADD SYNC BUTTON AFTER "Underlying Index : ..."
+       ADD "SYNC" BUTTON AFTER "Underlying Index"
     ============================================================ */
     function addSyncButton() {
         const nodes = [...document.querySelectorAll("strong, b, span, label, p, div")];
@@ -123,7 +123,7 @@
             cursor: pointer;
         `;
 
-        btn.onclick = () => renderHTMLBars(); // manual refresh
+        btn.onclick = () => renderHTMLBars();
 
         target.appendChild(btn);
     }
@@ -131,14 +131,14 @@
     setTimeout(addSyncButton, 1200);
 
     /* ============================================================
-       PARSE NUMBERS
+       PARSE WITH SAFE NUMBER EXTRACTOR
     ============================================================ */
     function parseNumber(v) {
         return parseInt(v.replace(/,/g, "")) || 0;
     }
 
     /* ============================================================
-       READ NSE OPTION CHAIN TABLE (CORRECT COLUMN MAP)
+       READ NSE TABLE DATA (CORRECT COLUMN MAPPING)
     ============================================================ */
     function getOptionData() {
         const rows = [...document.querySelectorAll("table tbody tr")];
@@ -161,7 +161,7 @@
     }
 
     /* ============================================================
-       BAR WIDTH CALCULATION
+       BAR WIDTH CALCULATOR
     ============================================================ */
     function barWidth(value, max) {
         if (max === 0) return 0;
@@ -169,7 +169,7 @@
     }
 
     /* ============================================================
-       RENDER HISTOGRAM HTML
+       RENDER HISTOGRAM BOXES
     ============================================================ */
     function renderHTMLBars() {
         const box = document.getElementById("oiContainer");
@@ -194,7 +194,7 @@
         data.forEach(row => {
             html += `
                 <div style="margin-bottom:20px;border-bottom:1px dashed #ddd;padding-bottom:10px;">
-                    
+
                     <div style="font-size:20px;font-weight:700;margin-bottom:10px;">
                         ${row.strike.toLocaleString()}
                     </div>
@@ -227,7 +227,7 @@
     }
 
     /* ============================================================
-       INSTANT AUTO-SYNC WHEN NSE TABLE UPDATES
+       INSTANT REFRESH WHEN NSE UPDATES TABLE DATA
     ============================================================ */
     function enableInstantSync() {
         const table = document.querySelector("table tbody");
@@ -240,7 +240,7 @@
 
             if (now !== last) {
                 last = now;
-                renderHTMLBars(); // update immediately
+                renderHTMLBars();
             }
         });
 
@@ -248,7 +248,34 @@
     }
 
     /* ============================================================
-       INITIALIZE
+       FIX: UPDATE WHEN INDEX / STOCK CHANGES (TABLE REPLACED)
+    ============================================================ */
+    function monitorTableReplacement() {
+        const root = document.body;
+
+        const observer = new MutationObserver(() => {
+            const table = document.querySelector("table tbody");
+
+            if (table && !window.__OI_TABLE_BIND__) {
+                window.__OI_TABLE_BIND__ = true;
+
+                enableInstantSync();
+                renderHTMLBars();
+                setTimeout(addSyncButton, 800);
+
+                setTimeout(() => {
+                    window.__OI_TABLE_BIND__ = false;
+                }, 1000);
+            }
+        });
+
+        observer.observe(root, { childList: true, subtree: true });
+    }
+
+    monitorTableReplacement();
+
+    /* ============================================================
+       INITIALIZE SYSTEM
     ============================================================ */
     waitForTable(() => {
         renderHTMLBars();
