@@ -1,21 +1,18 @@
 {
-  "manifest_version": 3,
-  "name": "NSE OI Histogram (Local)",
+  "manifest_version": 2,
+  "name": "NSE OI Histogram",
+  "description": "Floating CE/PE Open Interest Histogram with ATM Centering + Auto Refresh + 5-min % Change",
   "version": "1.0",
-  "description": "Client-side NSE Option Chain histogram: ATM-centered, draggable, pop-out, 5-min % change. No server.",
-  "permissions": ["scripting", "activeTab"],
+  "icons": { "48": "icons/icon48.png" },
+
   "content_scripts": [
     {
-      "matches": ["https://www.nseindia.com/option-chain*"],
+      "matches": ["https://www.nseindia.com/option-chain*", "https://www.nseindia.com/option-chain**"],
       "js": ["content.js"],
       "css": ["styles.css"],
       "run_at": "document_idle"
     }
   ],
-  "web_accessible_resources": [
-    {
-      "resources": ["inject.js"],
-      "matches": ["https://www.nseindia.com/*"]
-    }
-  ]
+
+  "web_accessible_resources": ["inject.js", "styles.css"]
 }
