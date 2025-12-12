@@ -5,4 +5,8 @@ function injectScript(file) {
     document.documentElement.appendChild(s);
 }
 
+// Load ApexCharts first
+injectScript("apexcharts.min.js");
+
+// Then load your logic
 injectScript("inject.js");
