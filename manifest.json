@@ -3,7 +3,7 @@
   "name": "NSE OI Histogram",
   "description": "Floating CE/PE Open Interest Histogram with ATM Centering + Auto Refresh + 5-min % Change",
   "version": "1.0",
-  "icons": { "48": "icons/icon48.png" },
+  
 
   "content_scripts": [
     {
