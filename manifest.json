@@ -18,7 +18,6 @@
 
   "web_accessible_resources": [
     "inject.js",
-    "styles.css",
-    "apexcharts.min.js"
+    "styles.css"
   ]
 }
