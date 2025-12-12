@@ -6,7 +6,6 @@
 
     let chart = null;
 
-    // Wait for NSE option chain table
     function waitForTable(callback) {
         const check = setInterval(() => {
             if (document.querySelector("table tbody")) {
@@ -16,7 +15,6 @@
         }, 400);
     }
 
-    // Create floating panel
     function createPanel() {
         const panel = document.createElement("div");
         panel.id = "oiHistogramPanel";
@@ -55,7 +53,6 @@
 
     createPanel();
 
-    // Extract table data (ALL STRIKES)
     function getOptionData() {
         const rows = [...document.querySelectorAll("table tbody tr")];
         const data = [];
@@ -76,43 +73,63 @@
         return data.filter(x => x.strike > 0);
     }
 
-    // ============================
-    // APPLY VERTICAL BAR OFFSETS
-    // ============================
-    function applyVerticalOffsets(chartCtx) {
-        const offsets = [ -16, -4, 8, 20 ];  
-        // CE OI, PE OI, CE Chg, PE Chg positions
-
-        setTimeout(() => {
-            const barGroups = chartCtx.el.querySelectorAll(".apexcharts-series");
-
-            barGroups.forEach((series, i) => {
-                const offset = offsets[i];
-                series.querySelectorAll(".apexcharts-bar-area").forEach(bar => {
-                    bar.setAttribute(
-                        "transform",
-                        `translate(0, ${offset})`
-                    );
-                });
-            });
-        }, 50);
-    }
-
-    // ============================
-    // RENDER FINAL PERFECT CHART
-    // ============================
+    // ======================================================
+    // FINAL PERFECT BAR LOGIC
+    // 1 STRIKE = 5 ROWS (1 label + 4 bars)
+    // ======================================================
     function renderHistogram() {
         const data = getOptionData();
         if (!data.length) return;
 
-        // Sort strikes numerically (ascending)
         data.sort((a, b) => a.strike - b.strike);
 
-        const strikes = data.map(x => x.strike);
-        const ceOI = data.map(x => x.ceOI);
-        const peOI = data.map(x => x.peOI);
-        const ceChg = data.map(x => x.ceChg);
-        const peChg = data.map(x => x.peChg);
+        const categories = [];
+        const ceOI = [], peOI = [], ceChg = [], peChg = [];
+
+        data.forEach(row => {
+
+            // Strike visible row (no bar)
+            categories.push(`${row.strike}`);
+            ceOI.push(null);
+            peOI.push(null);
+            ceChg.push(null);
+            peChg.push(null);
+
+            // CE OI
+            categories.push("CE OI");
+            ceOI.push(row.ceOI);
+            peOI.push(null);
+            ceChg.push(null);
+            peChg.push(null);
+
+            // PE OI
+            categories.push("PE OI");
+            ceOI.push(null);
+            peOI.push(row.peOI);
+            ceChg.push(null);
+            peChg.push(null);
+
+            // CE Change
+            categories.push("CE Chg");
+            ceOI.push(null);
+            peOI.push(null);
+            ceChg.push(row.ceChg);
+            peChg.push(null);
+
+            // PE Change
+            categories.push("PE Chg");
+            ceOI.push(null);
+            peOI.push(null);
+            ceChg.push(null);
+            peChg.push(row.peChg);
+
+            // Separator blank row for spacing
+            categories.push("");
+            ceOI.push(null);
+            peOI.push(null);
+            ceChg.push(null);
+            peChg.push(null);
+        });
 
         document.querySelector("#oiChartContainer").innerHTML = "";
 
@@ -126,61 +143,55 @@
 
             chart: {
                 type: "bar",
-                height: strikes.length * 55,
+                height: categories.length * 28,
                 stacked: false,
                 animations: { enabled: false },
-                toolbar: { show: false },
-
-                events: {
-                    mounted: applyVerticalOffsets,
-                    updated: applyVerticalOffsets
-                }
+                toolbar: { show: false }
             },
-
-            colors: [
-                "#ff3030",  // CE OI red
-                "#16c784",  // PE OI green
-                "#ffb300",  // CE Chg yellow
-                "#0066ff"   // PE Chg blue
-            ],
 
             plotOptions: {
                 bar: {
                     horizontal: true,
-                    barHeight: "40%",  
-                    borderRadius: 4
+                    barHeight: "70%",
+                    borderRadius: 3
                 }
             },
+
+            colors: [
+                "#ff3030",
+                "#16c784",
+                "#ffb300",
+                "#0066ff"
+            ],
 
             dataLabels: {
                 enabled: true,
                 formatter: v => (v ? v.toLocaleString() : ""),
-                style: { fontSize: "12px", fontWeight: "700", colors: ["#000"] },
-                offsetX: 6
+                style: { fontSize: "12px", fontWeight: 700, colors: ["#000"] },
+                offsetX: 8
             },
 
             xaxis: {
-                categories: strikes,
+                categories,
                 labels: {
-                    style: { fontSize: "14px", fontWeight: "700" }
+                    style: { fontSize: "13px", fontWeight: 700 }
                 }
             },
 
             yaxis: {
                 labels: {
-                    style: { fontSize: "15px", fontWeight: "700" }
+                    style: { fontSize: "14px", fontWeight: 700 }
                 }
             },
 
             grid: {
-                strokeDashArray: 3,
+                strokeDashArray: 4,
                 borderColor: "#ccc"
             },
 
             legend: {
                 position: "top",
-                fontSize: "14px",
-                markers: { width: 14, height: 14, radius: 4 }
+                fontSize: "14px"
             }
         };
 
@@ -188,7 +199,6 @@
         chart.render();
     }
 
-    // Auto refresh
     waitForTable(() => {
         renderHistogram();
         setInterval(renderHistogram, 3000);
