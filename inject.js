@@ -5,7 +5,7 @@
     window.__OI_HISTOGRAM_INIT__ = true;
 
     /* ============================================================
-       WAIT UNTIL OPTION CHAIN TABLE EXISTS
+       WAIT FOR TABLE TO LOAD
     ============================================================ */
     function waitForTable(callback) {
         const check = setInterval(() => {
@@ -17,7 +17,60 @@
     }
 
     /* ============================================================
-       MAIN PANEL UI (WITH MINIMIZE & MAXIMIZE)
+       DRAGGABLE PANEL SUPPORT
+    ============================================================ */
+    function makePanelDraggable(panel, header) {
+        let isDown = false;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        // Mouse drag start
+        header.addEventListener("mousedown", function (e) {
+            isDown = true;
+            offsetX = e.clientX - panel.offsetLeft;
+            offsetY = e.clientY - panel.offsetTop;
+            document.body.style.userSelect = "none";
+        });
+
+        // Mouse drag move
+        document.addEventListener("mousemove", function (e) {
+            if (!isDown) return;
+            panel.style.left = (e.clientX - offsetX) + "px";
+            panel.style.top = (e.clientY - offsetY) + "px";
+        });
+
+        // Mouse drag end
+        document.addEventListener("mouseup", function () {
+            isDown = false;
+            document.body.style.userSelect = "auto";
+        });
+
+        // Touch drag start
+        header.addEventListener("touchstart", function (e) {
+            isDown = true;
+            const t = e.touches[0];
+            offsetX = t.clientX - panel.offsetLeft;
+            offsetY = t.clientY - panel.offsetTop;
+            document.body.style.userSelect = "none";
+        });
+
+        // Touch drag move
+        document.addEventListener("touchmove", function (e) {
+            if (!isDown) return;
+            const t = e.touches[0];
+            panel.style.left = (t.clientX - offsetX) + "px";
+            panel.style.top = (t.clientY - offsetY) + "px";
+        });
+
+        // Touch drag end
+        document.addEventListener("touchend", function () {
+            isDown = false;
+            document.body.style.userSelect = "auto";
+        });
+    }
+
+    /* ============================================================
+       CREATE PANEL (with minimize + draggable)
     ============================================================ */
     function createPanel() {
         const panel = document.createElement("div");
@@ -35,14 +88,14 @@
             padding: 0;
             font-family: sans-serif;
             overflow: hidden;
-            transition: height 0.25s ease, opacity 0.25s ease;
+            transition: height 0.25s ease;
         `;
 
         panel.innerHTML = `
             <div id="oiHeader" 
                 style="display:flex;justify-content:space-between;align-items:center;
                 font-size:20px;font-weight:700;padding:8px 12px;
-                background:#0a73eb;color:white;border-radius:12px;">
+                background:#0a73eb;color:white;border-radius:12px;cursor:grab;">
                 
                 <span>OI Histogram</span>
 
@@ -62,13 +115,13 @@
         document.body.appendChild(panel);
 
         const container = document.getElementById("oiContainer");
+        const header = document.getElementById("oiHeader");
         const toggleBtn = document.getElementById("toggleMin");
         const closeBtn = document.getElementById("closeOI");
 
         let minimized = false;
         let fullHeight = 500;
 
-        // Save height after DOM paints
         setTimeout(() => {
             fullHeight = panel.offsetHeight;
         }, 300);
@@ -88,12 +141,15 @@
         };
 
         closeBtn.onclick = () => panel.remove();
+
+        // Enable dragging
+        makePanelDraggable(panel, header);
     }
 
     createPanel();
 
     /* ============================================================
-       ADD "SYNC" BUTTON AFTER "Underlying Index"
+       ADD SYNC BUTTON AFTER UNDERLYING INDEX
     ============================================================ */
     function addSyncButton() {
         const nodes = [...document.querySelectorAll("strong, b, span, label, p, div")];
@@ -106,8 +162,7 @@
             }
         }
 
-        if (!target) return;
-        if (document.getElementById("oiSyncBtn")) return;
+        if (!target || document.getElementById("oiSyncBtn")) return;
 
         const btn = document.createElement("button");
         btn.id = "oiSyncBtn";
@@ -131,14 +186,14 @@
     setTimeout(addSyncButton, 1200);
 
     /* ============================================================
-       PARSE WITH SAFE NUMBER EXTRACTOR
+       UTIL: NUMBER PARSER
     ============================================================ */
     function parseNumber(v) {
         return parseInt(v.replace(/,/g, "")) || 0;
     }
 
     /* ============================================================
-       READ NSE TABLE DATA (CORRECT COLUMN MAPPING)
+       READ OPTION CHAIN TABLE
     ============================================================ */
     function getOptionData() {
         const rows = [...document.querySelectorAll("table tbody tr")];
@@ -161,7 +216,7 @@
     }
 
     /* ============================================================
-       BAR WIDTH CALCULATOR
+       BAR SIZE CALCULATOR
     ============================================================ */
     function barWidth(value, max) {
         if (max === 0) return 0;
@@ -169,7 +224,7 @@
     }
 
     /* ============================================================
-       RENDER HISTOGRAM BOXES
+       RENDER HISTOGRAM
     ============================================================ */
     function renderHTMLBars() {
         const box = document.getElementById("oiContainer");
@@ -227,7 +282,7 @@
     }
 
     /* ============================================================
-       INSTANT REFRESH WHEN NSE UPDATES TABLE DATA
+       AUTO UPDATE WHEN TABLE CONTENT CHANGES
     ============================================================ */
     function enableInstantSync() {
         const table = document.querySelector("table tbody");
@@ -248,7 +303,7 @@
     }
 
     /* ============================================================
-       FIX: UPDATE WHEN INDEX / STOCK CHANGES (TABLE REPLACED)
+       FIX: DETECT INDEX/STOCK CHANGE & RE-ATTACH OBSERVER
     ============================================================ */
     function monitorTableReplacement() {
         const root = document.body;
@@ -265,7 +320,7 @@
 
                 setTimeout(() => {
                     window.__OI_TABLE_BIND__ = false;
-                }, 1000);
+                }, 800);
             }
         });
 
@@ -275,7 +330,7 @@
     monitorTableReplacement();
 
     /* ============================================================
-       INITIALIZE SYSTEM
+       INIT
     ============================================================ */
     waitForTable(() => {
         renderHTMLBars();
