@@ -4,6 +4,9 @@
     if (window.__OI_HISTOGRAM_INIT__) return;
     window.__OI_HISTOGRAM_INIT__ = true;
 
+    /* ============================================================
+       WAIT FOR OPTION CHAIN TABLE TO LOAD
+    ============================================================ */
     function waitForTable(callback) {
         const check = setInterval(() => {
             if (document.querySelector("table tbody tr td")) {
@@ -13,6 +16,9 @@
         }, 400);
     }
 
+    /* ============================================================
+       CREATE HISTOGRAM PANEL + MIN/MAX
+    ============================================================ */
     function createPanel() {
         const panel = document.createElement("div");
         panel.id = "oiHistogramPanel";
@@ -56,14 +62,13 @@
         document.body.appendChild(panel);
 
         const container = document.getElementById("oiContainer");
-        const header = document.getElementById("oiHeader");
         const toggleBtn = document.getElementById("toggleMin");
         const closeBtn = document.getElementById("closeOI");
 
         let minimized = false;
         let fullHeight = 500;
 
-        // Save full height after render
+        // Save height after render
         setTimeout(() => {
             fullHeight = panel.offsetHeight;
         }, 300);
@@ -87,10 +92,54 @@
 
     createPanel();
 
+    /* ============================================================
+       ADD SYNC BUTTON AFTER "Underlying Index : ..."
+    ============================================================ */
+    function addSyncButton() {
+        const nodes = [...document.querySelectorAll("strong, b, span, label, p, div")];
+        let target = null;
+
+        for (let el of nodes) {
+            if (el.innerText.includes("Underlying Index")) {
+                target = el.parentElement;
+                break;
+            }
+        }
+
+        if (!target) return;
+        if (document.getElementById("oiSyncBtn")) return;
+
+        const btn = document.createElement("button");
+        btn.id = "oiSyncBtn";
+        btn.innerText = "🔄 Sync";
+        btn.style.cssText = `
+            margin-left: 12px;
+            padding: 4px 10px;
+            font-size: 13px;
+            border-radius: 8px;
+            border: 1px solid #0a73eb;
+            background: white;
+            color: #0a73eb;
+            cursor: pointer;
+        `;
+
+        btn.onclick = () => renderHTMLBars(); // manual refresh
+
+        target.appendChild(btn);
+    }
+
+    setTimeout(addSyncButton, 1200);
+
+    /* ============================================================
+       PARSE NUMBERS
+    ============================================================ */
     function parseNumber(v) {
         return parseInt(v.replace(/,/g, "")) || 0;
     }
 
+    /* ============================================================
+       READ NSE OPTION CHAIN TABLE (CORRECT COLUMN MAP)
+    ============================================================ */
     function getOptionData() {
         const rows = [...document.querySelectorAll("table tbody tr")];
         const data = [];
@@ -111,11 +160,17 @@
         return data.filter(x => x.strike > 0);
     }
 
+    /* ============================================================
+       BAR WIDTH CALCULATION
+    ============================================================ */
     function barWidth(value, max) {
         if (max === 0) return 0;
         return Math.max(8, (value / max) * 250);
     }
 
+    /* ============================================================
+       RENDER HISTOGRAM HTML
+    ============================================================ */
     function renderHTMLBars() {
         const box = document.getElementById("oiContainer");
         const data = getOptionData();
@@ -139,7 +194,7 @@
         data.forEach(row => {
             html += `
                 <div style="margin-bottom:20px;border-bottom:1px dashed #ddd;padding-bottom:10px;">
-
+                    
                     <div style="font-size:20px;font-weight:700;margin-bottom:10px;">
                         ${row.strike.toLocaleString()}
                     </div>
@@ -171,9 +226,33 @@
         box.innerHTML = html;
     }
 
+    /* ============================================================
+       INSTANT AUTO-SYNC WHEN NSE TABLE UPDATES
+    ============================================================ */
+    function enableInstantSync() {
+        const table = document.querySelector("table tbody");
+        if (!table) return;
+
+        let last = table.innerText;
+
+        const observer = new MutationObserver(() => {
+            const now = table.innerText;
+
+            if (now !== last) {
+                last = now;
+                renderHTMLBars(); // update immediately
+            }
+        });
+
+        observer.observe(table, { childList: true, subtree: true });
+    }
+
+    /* ============================================================
+       INITIALIZE
+    ============================================================ */
     waitForTable(() => {
         renderHTMLBars();
-        setInterval(renderHTMLBars, 3000);
+        enableInstantSync();
     });
 
 })();
