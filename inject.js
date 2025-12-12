@@ -91,7 +91,7 @@ function renderHistogram() {
     const data = getOptionData();
     if (!data.length) return;
 
-    // Detect ATM
+    // ATM logic
     const spotText = document.querySelector("#underlyingValue, .underlying")?.innerText || "";
     const spot = parseFloat(spotText.replace(/[^\d.]/g, "")) || data[Math.floor(data.length / 2)].strike;
 
@@ -102,22 +102,18 @@ function renderHistogram() {
     let finalData = [...data];
     if (keepATM) {
         const mid = finalData.indexOf(atmStrike);
-        finalData = finalData.slice(
-            Math.max(0, mid - strikeCount),
-            Math.min(finalData.length, mid + strikeCount + 1)
-        );
+        finalData = finalData.slice(Math.max(0, mid - strikeCount), Math.min(finalData.length, mid + strikeCount + 1));
     } else {
         finalData = finalData.slice(0, strikeCount * 2);
     }
 
-    // Build single strike axis (strike appears once)
     const strikes = finalData.map(x => x.strike);
     const ceOI = finalData.map(x => x.ceOI);
     const peOI = finalData.map(x => x.peOI);
     const ceChg = finalData.map(x => x.ceChg);
     const peChg = finalData.map(x => x.peChg);
 
-    // Reset old chart
+    // Clear previous chart
     document.querySelector("#oiChartContainer").innerHTML = "";
 
     const options = {
@@ -129,25 +125,35 @@ function renderHistogram() {
         ],
         chart: {
             type: "bar",
-            height: strikes.length * 60,    // 1 strike = 60px group
-            stacked: false,                 // group bars, not stack
+            height: strikes.length * 50,
+            stacked: false,
             animations: { enabled: false },
             toolbar: { show: false }
         },
         plotOptions: {
             bar: {
                 horizontal: true,
-                barHeight: "70%",
-                rangeBarOverlap: false,
-                rangeBarGroupRows: true       // 👉 makes CE+PE+CEchg+PEchg grouped
+                barHeight: "30%",         // smaller bar
+                rangeBarOverlap: false
             }
         },
-        colors: ["#ff3b30", "#34c759", "#ff9500", "#0060ff"],
+        // 👉 Offsets to fix overlap (magical part)
         dataLabels: {
             enabled: true,
             formatter: (val) => val.toLocaleString(),
-            style: { fontSize: "12px", colors: ["#000"] }
+            style: { fontSize: "12px", fontWeight: "600" },
+            offsetY: 0
         },
+        // CUSTOM OFFSETS PER SERIES
+        // (CE OI top, PE OI slightly lower, CE Chg slightly lower, PE Chg lowest)
+        seriesOffsets: [
+            15,   // CE OI
+            5,    // PE OI
+            -5,   // CE Chg
+            -15   // PE Chg
+        ],
+        // Inject offsets after rendering
+        tooltip: { shared: false },
         xaxis: {
             categories: strikes,
             labels: { style: { fontSize: "13px" } }
@@ -155,15 +161,26 @@ function renderHistogram() {
         yaxis: {
             labels: { style: { fontSize: "14px", fontWeight: 600 } }
         },
+        colors: ["#ff3b30", "#34c759", "#ff9500", "#0050ff"],
         legend: {
             position: "top",
             fontSize: "14px"
-        },
-        grid: { strokeDashArray: 4 }
+        }
     };
 
     chart = new ApexCharts(document.querySelector("#oiChartContainer"), options);
-    chart.render();
+
+    chart.render().then(() => {
+        // Apply Y-offset manually
+        const offsets = options.seriesOffsets;
+
+        document.querySelectorAll(".apexcharts-bar-series").forEach((series, i) => {
+            const offset = offsets[i];
+            series.querySelectorAll(".apexcharts-bar-area").forEach(bar => {
+                bar.setAttribute("transform", `translate(0, ${offset})`);
+            });
+        });
+    });
 }
 
 
