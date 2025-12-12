@@ -142,14 +142,14 @@
 
         closeBtn.onclick = () => panel.remove();
 
-        // Enable dragging
+        // ENABLE DRAGGING
         makePanelDraggable(panel, header);
     }
 
     createPanel();
 
     /* ============================================================
-       ADD SYNC BUTTON AFTER UNDERLYING INDEX
+       ADD SYNC BUTTON NEXT TO UNDERLYING INDEX
     ============================================================ */
     function addSyncButton() {
         const nodes = [...document.querySelectorAll("strong, b, span, label, p, div")];
@@ -193,7 +193,7 @@
     }
 
     /* ============================================================
-       READ OPTION CHAIN TABLE
+       READ NSE OPTION CHAIN TABLE (CORRECT COLUMN MAP)
     ============================================================ */
     function getOptionData() {
         const rows = [...document.querySelectorAll("table tbody tr")];
@@ -224,7 +224,7 @@
     }
 
     /* ============================================================
-       RENDER HISTOGRAM
+       RENDER HISTOGRAM (DECREASING ORDER)
     ============================================================ */
     function renderHTMLBars() {
         const box = document.getElementById("oiContainer");
@@ -235,7 +235,10 @@
             return;
         }
 
-        data.sort((a, b) => a.strike - b.strike);
+        /* 
+         *  🔥 NEW: Sort strikes in DECREASING ORDER (highest → lowest)
+         */
+        data.sort((a, b) => b.strike - a.strike);
 
         const maxVal = Math.max(
             ...data.map(x => x.ceOI),
@@ -292,7 +295,6 @@
 
         const observer = new MutationObserver(() => {
             const now = table.innerText;
-
             if (now !== last) {
                 last = now;
                 renderHTMLBars();
@@ -303,11 +305,9 @@
     }
 
     /* ============================================================
-       FIX: DETECT INDEX/STOCK CHANGE & RE-ATTACH OBSERVER
+       FIX: DETECT INDEX/STOCK CHANGE & REATTACH OBSERVER
     ============================================================ */
     function monitorTableReplacement() {
-        const root = document.body;
-
         const observer = new MutationObserver(() => {
             const table = document.querySelector("table tbody");
 
@@ -324,13 +324,13 @@
             }
         });
 
-        observer.observe(root, { childList: true, subtree: true });
+        observer.observe(document.body, { childList: true, subtree: true });
     }
 
     monitorTableReplacement();
 
     /* ============================================================
-       INIT
+       INITIAL RUN
     ============================================================ */
     waitForTable(() => {
         renderHTMLBars();
