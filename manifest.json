@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "NSE OI Histogram (Local)",
+  "version": "1.0",
+  "description": "Client-side NSE Option Chain histogram: ATM-centered, draggable, pop-out, 5-min % change. No server.",
+  "permissions": ["scripting", "activeTab"],
+  "content_scripts": [
+    {
+      "matches": ["https://www.nseindia.com/option-chain*"],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["inject.js"],
+      "matches": ["https://www.nseindia.com/*"]
+    }
+  ]
+}
