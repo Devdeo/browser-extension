@@ -6,7 +6,7 @@
 
     function waitForTable(callback) {
         const check = setInterval(() => {
-            if (document.querySelector("table tbody")) {
+            if (document.querySelector("table tbody tr td")) {
                 clearInterval(check);
                 callback();
             }
@@ -51,30 +51,37 @@
 
     createPanel();
 
+    function parseNumber(v) {
+        return parseInt(v.replace(/,/g, "")) || 0;
+    }
+
+    // ================================================
+    // CORRECT COLUMN MAPPING FOR NSE OPTION CHAIN TABLE
+    // ================================================
     function getOptionData() {
         const rows = [...document.querySelectorAll("table tbody tr")];
         const data = [];
 
         rows.forEach(r => {
             const c = r.querySelectorAll("td");
-            if (c.length < 15) return;
+            if (c.length < 21) return;  // ensure row fully exists
 
             data.push({
-                ceOI: parseInt(c[1].innerText.replace(/,/g, "")) || 0,
-                ceChg: parseInt(c[2].innerText.replace(/,/g, "")) || 0,
-                strike: parseFloat(c[11].innerText.replace(/,/g, "")) || 0,
-                peChg: parseInt(c[12].innerText.replace(/,/g, "")) || 0,
-                peOI: parseInt(c[13].innerText.replace(/,/g, "")) || 0
+                ceOI:  parseNumber(c[0].innerText),   // Calls OI
+                ceChg: parseNumber(c[1].innerText),   // Calls Chng in OI
+                strike: parseNumber(c[10].innerText), // Strike price
+                peChg: parseNumber(c[19].innerText),  // Puts Chng in OI
+                peOI:  parseNumber(c[20].innerText)   // Puts OI
             });
         });
 
         return data.filter(x => x.strike > 0);
     }
 
-    // Convert number → pixel width
+    // Convert value → proportional pixel width
     function barWidth(value, max) {
         if (max === 0) return 0;
-        return Math.max(5, (value / max) * 250); // 250px max width
+        return Math.max(8, (value / max) * 250); // max bar = 250px
     }
 
     function renderHTMLBars() {
@@ -82,7 +89,7 @@
         const data = getOptionData();
 
         if (!data.length) {
-            box.innerHTML = "Waiting for data…";
+            box.innerHTML = "Waiting for NSE data…";
             return;
         }
 
@@ -99,30 +106,34 @@
 
         data.forEach(row => {
             html += `
-                <div style="margin-bottom:18px;border-bottom:1px dashed #ccc;padding-bottom:8px;">
-                    
-                    <div style="font-size:18px;font-weight:700;margin-bottom:6px;">
-                        ${row.strike}
+                <div style="margin-bottom:20px;border-bottom:1px dashed #ddd;padding-bottom:10px;">
+
+                    <div style="font-size:20px;font-weight:700;margin-bottom:10px;">
+                        ${row.strike.toLocaleString()}
                     </div>
 
-                    <div style="display:flex;align-items:center;">
-                        <div style="width:${barWidth(row.ceOI,maxVal)}px;height:10px;background:#ff3030;border-radius:5px;"></div>
-                        <span style="margin-left:6px;font-size:12px;">${row.ceOI.toLocaleString()}</span>
+                    <!-- CE OI -->
+                    <div style="display:flex;align-items:center;margin:4px 0;">
+                        <div style="width:${barWidth(row.ceOI,maxVal)}px;height:12px;background:#ff3030;border-radius:6px;"></div>
+                        <span style="margin-left:6px;font-size:13px;">${row.ceOI.toLocaleString()}</span>
                     </div>
 
-                    <div style="display:flex;align-items:center;">
-                        <div style="width:${barWidth(row.peOI,maxVal)}px;height:10px;background:#16c784;border-radius:5px;"></div>
-                        <span style="margin-left:6px;font-size:12px;">${row.peOI.toLocaleString()}</span>
+                    <!-- PE OI -->
+                    <div style="display:flex;align-items:center;margin:4px 0;">
+                        <div style="width:${barWidth(row.peOI,maxVal)}px;height:12px;background:#16c784;border-radius:6px;"></div>
+                        <span style="margin-left:6px;font-size:13px;">${row.peOI.toLocaleString()}</span>
                     </div>
 
-                    <div style="display:flex;align-items:center;">
-                        <div style="width:${barWidth(row.ceChg,maxVal)}px;height:10px;background:#ffb300;border-radius:5px;"></div>
-                        <span style="margin-left:6px;font-size:12px;">${row.ceChg.toLocaleString()}</span>
+                    <!-- CE Chg OI -->
+                    <div style="display:flex;align-items:center;margin:4px 0;">
+                        <div style="width:${barWidth(row.ceChg,maxVal)}px;height:12px;background:#ffb300;border-radius:6px;"></div>
+                        <span style="margin-left:6px;font-size:13px;">${row.ceChg.toLocaleString()}</span>
                     </div>
 
-                    <div style="display:flex;align-items:center;">
-                        <div style="width:${barWidth(row.peChg,maxVal)}px;height:10px;background:#0066ff;border-radius:5px;"></div>
-                        <span style="margin-left:6px;font-size:12px;">${row.peChg.toLocaleString()}</span>
+                    <!-- PE Chg OI -->
+                    <div style="display:flex;align-items:center;margin:4px 0;">
+                        <div style="width:${barWidth(row.peChg,maxVal)}px;height:12px;background:#0066ff;border-radius:6px;"></div>
+                        <span style="margin-left:6px;font-size:13px;">${row.peChg.toLocaleString()}</span>
                     </div>
 
                 </div>
