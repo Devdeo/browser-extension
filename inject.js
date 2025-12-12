@@ -1,536 +1,658 @@
-// inject.js
-(function(){
-  "use strict";
+// inject.js — NSE Option Chain OI Histogram content script
+(function () {
+  if (window.__NSE_OI_HISTOGRAM_INJECTED) return;
+  window.__NSE_OI_HISTOGRAM_INJECTED = true;
 
-  if (window.__OI_HISTOGRAM_INJECTED__) return;
-  window.__OI_HISTOGRAM_INJECTED__ = true;
-
-  /**************************************************************************
-   * Config
-   **************************************************************************/
-  const REFRESH_MS = 3000;          // redraw interval
-  const HISTORY_WINDOW_MS = 300000; // 5 minutes in ms
-  let strikeRange = 5;              // default ± strikes (user can change)
-  let keepATMcenter = true;
-
-  /**************************************************************************
+  /*********************************************************
    * Utilities
-   **************************************************************************/
-  const $ = sel => document.querySelector(sel);
-  const $$ = sel => Array.from(document.querySelectorAll(sel));
-  const num = s => {
-    if (s === null || s === undefined) return 0;
-    const t = String(s).replace(/[^\d\-.]/g, "");
-    const v = parseFloat(t);
-    return Number.isFinite(v) ? v : 0;
+   *********************************************************/
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const formatNum = (n) => {
+    if (n === null || n === undefined || Number.isNaN(Number(n))) return '-';
+    n = Number(n);
+    if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+    if (Math.abs(n) >= 1e3) return (n / 1e3).toFixed(0) + 'k';
+    return n.toString();
   };
+  const formatPercent = (v) => (v === null || v === undefined) ? '-' : (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
 
-  function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
-
-  /**************************************************************************
-   * Panel UI
-   **************************************************************************/
-  function createPanel(){
-    const panel = document.createElement("div");
-    panel.id = "oi-hist-panel";
-    panel.style.cssText = `
-      position: fixed;
-      top: 72px;
-      left: 12px;
-      z-index: 999999;
-      width: 420px;
-      max-width: calc(100% - 24px);
-      border-radius: 14px;
-      box-shadow: 0 8px 30px rgba(0,0,0,0.25);
-      background: #fff;
-      font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial;
-      color: #111;
-      user-select: none;
-    `;
-    panel.innerHTML = `
-      <div id="oi-hist-bar" style="background:#0a73eb;color:#fff;padding:10px 12px;border-radius:12px 12px 0 0;display:flex;align-items:center;justify-content:space-between">
-        <div style="font-weight:700">OI Histogram</div>
-        <div style="display:flex;gap:10px;align-items:center">
-          <button id="oi-detach-btn" title="Detach" style="background:transparent;border:none;color:#fff;font-weight:700;cursor:pointer">Detach</button>
-          <button id="oi-close-btn" title="Close" style="background:transparent;border:none;color:#fff;font-weight:700;cursor:pointer">✖</button>
-        </div>
-      </div>
-
-      <div style="padding:10px 12px; font-size:13px;">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-          <button id="oi-minus" style="width:34px;height:34px;font-size:20px">−</button>
-          <div style="min-width:36px;text-align:center;font-weight:700" id="oi-range-txt">${strikeRange}</div>
-          <button id="oi-plus" style="width:34px;height:34px;font-size:20px">+</button>
-          <label style="margin-left:8px;display:flex;align-items:center;gap:6px;">
-            <input type="checkbox" id="oi-atm-chk" ${keepATMcenter? 'checked':''}> <span>ATM center</span>
-          </label>
-        </div>
-        <div style="font-size:12px;color:#555;margin-bottom:6px">ATM centered • CE red • PE green • ΔCE yellow • ΔPE blue</div>
-        <div id="oi-canvas-wrap" style="width:100%;height:420px;overflow:auto;padding-top:6px"></div>
-      </div>
-    `;
-    document.body.appendChild(panel);
-
-    // drag
-    dragElement(panel, $("#oi-hist-bar"));
-
-    // wire controls
-    $("#oi-close-btn").onclick = ()=> panel.remove();
-    $("#oi-detach-btn").onclick = () => detachPanel();
-
-    $("#oi-minus").onclick = () => {
-      strikeRange = Math.max(1, strikeRange - 1);
-      $("#oi-range-txt").innerText = strikeRange;
-      renderOnce();
-    };
-    $("#oi-plus").onclick = () => {
-      strikeRange = Math.min(20, strikeRange + 1);
-      $("#oi-range-txt").innerText = strikeRange;
-      renderOnce();
-    };
-    $("#oi-atm-chk").onchange = (e) => {
-      keepATMcenter = e.target.checked;
-      renderOnce();
-    };
-
-    return panel;
-  }
-
-  function dragElement(elmnt, handle){
-    handle.style.cursor = 'grab';
-    let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
-    handle.onpointerdown = function(e) {
-      e.preventDefault();
-      handle.setPointerCapture(e.pointerId);
-      pos3 = e.clientX;
-      pos4 = e.clientY;
-      handle.style.cursor = 'grabbing';
-      document.onpointermove = pointerMove;
-      document.onpointerup = pointerUp;
-    };
-    function pointerMove(e){
-      e.preventDefault();
-      pos1 = pos3 - e.clientX;
-      pos2 = pos4 - e.clientY;
-      pos3 = e.clientX;
-      pos4 = e.clientY;
-      const rect = elmnt.getBoundingClientRect();
-      const left = clamp(rect.left - pos1, 4, window.innerWidth - 100);
-      const top = clamp(rect.top - pos2, 4, window.innerHeight - 60);
-      elmnt.style.left = left + "px";
-      elmnt.style.top = top + "px";
+  /*********************************************************
+   * Core: find option chain table and map columns
+   *********************************************************/
+  function findOptionChainTable() {
+    // Look for a table that contains "CALLS" or "STRIKE" text in headers
+    const tables = $$('table');
+    for (const t of tables) {
+      const headerText = t.innerText || '';
+      if (/CALLS/i.test(headerText) && /STRIKE/i.test(headerText)) return t;
+      if (/Option Chain/i.test(headerText) && /STRIKE/i.test(headerText)) return t;
     }
-    function pointerUp(e){
-      handle.releasePointerCapture(e.pointerId);
-      document.onpointermove = null;
-      document.onpointerup = null;
-      handle.style.cursor = 'grab';
+    // fallback: first large table
+    const big = tables.sort((a, b) => b.offsetHeight - a.offsetHeight)[0];
+    return big || null;
+  }
+
+  function mapTableColumns(table) {
+    // Attempt to find <thead> header cells, flatten them, and find STRIKE column index.
+    const thead = table.tHead;
+    const headerCells = thead ? Array.from(thead.querySelectorAll('th,td')) : Array.from(table.querySelectorAll('tr:first-child th, tr:first-child td'));
+    const texts = headerCells.map(h => (h.textContent || '').trim().replace(/\s+/g, ' '));
+    // find strike column by header text "STRIKE"
+    const strikeIndex = texts.findIndex(t => /STRIKE/i.test(t));
+    if (strikeIndex === -1) {
+      // try rows with 'STRIKE' anywhere
+      const r = Array.from(table.querySelectorAll('tr')).find(row => /STRIKE/i.test(row.innerText || ''));
+      if (r) {
+        const cells = Array.from(r.querySelectorAll('th,td')).map(c => (c.textContent || '').trim().replace(/\s+/g, ' '));
+        const idx = cells.findIndex(t => /STRIKE/i.test(t));
+        if (idx !== -1) return { strikeIndex: idx, headerCells: cells };
+      }
+      return null;
     }
+    return { strikeIndex, headerCells: texts };
   }
 
-  // detach to full overlay
-  function detachPanel(){
-    const overlay = document.createElement("div");
-    overlay.id = "oi-detach-overlay";
-    overlay.style.cssText = `
-      position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000001; display:flex;align-items:flex-start;justify-content:center;padding-top:40px;
-    `;
-    const content = document.createElement("div");
-    content.style.cssText = `width:95%;max-width:1100px;height:86vh;background:#fff;border-radius:12px;padding:12px;overflow:auto;`;
-    const close = document.createElement("button");
-    close.innerText = "Close";
-    close.style.cssText = "position:absolute;right:20px;top:20px;padding:8px 12px";
-    content.appendChild(close);
-    overlay.appendChild(content);
-    document.body.appendChild(overlay);
-
-    // move canvas wrap into overlay content
-    const wrap = $("#oi-canvas-wrap");
-    if (wrap) content.appendChild(wrap);
-    close.onclick = ()=>{
-      // move wrap back
-      const parent = document.querySelector("#oi-hist-panel div[id='oi-canvas-wrap']");
-      if (parent) parent.appendChild(wrap);
-      overlay.remove();
-    };
-  }
-
-  /**************************************************************************
-   * Table detection & parsing
-   **************************************************************************/
-  // Wait until the table (option chain) appears without interfering.
-  function whenTableReady(cb){
-    let tries=0;
-    const id = setInterval(()=>{
-      tries++;
-      // prefer the NSE option-chain table elements
-      let table = document.querySelector("table.opttbldata, table#optionChainTable, table.optionChainTable, table");
-      // avoid picking tiny tables: choose table with > 8 columns
-      if (table){
-        const cols = table.querySelectorAll("thead tr th").length || table.querySelectorAll("tbody tr:first-child td").length;
-        if (cols >= 8){
-          clearInterval(id);
-          cb(table);
-          return;
-        }
-      }
-      if (tries > 60) { // ~ 24s timeout
-        clearInterval(id);
-        cb(null);
-      }
-    }, 400);
-  }
-
-  // Heuristic parser for each row -> returns {strike, ceOI, peOI, ceChg, peChg}
-  function parseTableRows(table){
-    const rows = Array.from(table.querySelectorAll("tbody tr"));
+  /*********************************************************
+   * Parse rows
+   *********************************************************/
+  function parseRows(table, mapping) {
+    const strikeIdx = mapping.strikeIndex;
+    const rows = Array.from(table.querySelectorAll('tbody tr'));
     const parsed = [];
 
-    // try to find underlying spot price from page (several selectors tried)
-    let spot = 0;
-    const selectors = ["#underlyingValue", ".underlying", ".underlyingValue", ".index-val", ".index_val", ".widget_head .lastprice"];
-    for (const s of selectors){
-      const el = document.querySelector(s);
-      if (el && el.innerText){
-        spot = num(el.innerText);
-        if (spot>0) break;
-      }
-    }
+    for (const row of rows) {
+      const cells = Array.from(row.querySelectorAll('td,th')).map(c => (c.textContent || '').trim());
+      if (!cells || cells.length <= strikeIdx) continue;
+      const strikeRaw = cells[strikeIdx];
+      const strike = Number((strikeRaw || '').replace(/[,₹₹]/g, '').match(/-?\d+(\.\d+)?/) ? (strikeRaw.replace(/[,₹₹]/g,'').match(/-?\d+(\.\d+)?/)[0]) : NaN);
 
-    // For each row, we need to extract numeric values. NSE table structure often places
-    // CE columns left, strike in middle, PE columns right. We'll attempt fixed indices first
-    // and fall back to heuristic token extraction.
-    rows.forEach((r)=> {
-      const tds = Array.from(r.querySelectorAll("td"));
-      if (tds.length < 6) return;
+      // left section: indices < strikeIdx
+      // right section: indices > strikeIdx
+      // find CE OI and CE CHNG IN OI in left side by header text matching
+      // fallback heuristics: leftmost OI etc.
 
-      // Common new NSE layout mapping (works in many cases)
-      let ceOI=0, ceChg=0, strike=0, peChg=0, peOI=0;
-      try {
-        // try standard index positions (these indices may match many NSE pages)
-        // fallback safely using num() and guard for NaN
-        ceOI = num(tds[1]?.innerText);
-        ceChg = num(tds[2]?.innerText);
-        // strike often at middle
-        const midIdx = Math.floor(tds.length/2);
-        strike = num(tds[midIdx]?.innerText);
-        // right side indices (approx)
-        peChg = num(tds[midIdx+1]?.innerText);
-        peOI = num(tds[midIdx+2]?.innerText);
-      } catch(e){ /* ignore */ }
+      // helper to find header index by keywords inside headerCells on left/right.
+      const leftHeaders = mapping.headerCells.slice(0, strikeIdx);
+      const rightHeaders = mapping.headerCells.slice(strikeIdx + 1);
 
-      // If strike is zero/unreliable, attempt heuristic: find the single cell that looks like a strike (integer, >100 and <1e6)
-      if (!strike || strike < 1) {
-        for (const cell of tds){
-          const v = num(cell.innerText);
-          if (v>100 && v<1000000){
-            // pick the best candidate close to spot if available
-            strike = v;
-            break;
+      function findIndexIn(headersArray, keywords) {
+        for (let i = 0; i < headersArray.length; i++) {
+          const txt = headersArray[i].toUpperCase();
+          for (const kw of keywords) {
+            if (txt.includes(kw)) return i;
           }
         }
+        return -1;
       }
 
-      // If still 0, try fallback token extraction: gather numeric tokens across cells
-      if (!strike) {
-        const allNums = tds.map(td => num(td.innerText)).filter(n=>n>0);
-        if (allNums.length>0){
-          // pick middle value as strike
-          strike = allNums[Math.floor(allNums.length/2)] || 0;
-        }
+      // candidate keywords
+      const oiKeys = ['OI', 'O I', 'OPEN INTEREST'];
+      const chgKeys = ['CHNG IN OI', 'CHNG IN OI', 'CHNG', 'CHANGE IN OI', 'CHNG IN OI'];
+
+      const ceOiLocalIdx = findIndexIn(leftHeaders, oiKeys);
+      const ceChgLocalIdx = findIndexIn(leftHeaders, chgKeys);
+
+      const peOiLocalIdx = findIndexIn(rightHeaders, oiKeys);
+      const peChgLocalIdx = findIndexIn(rightHeaders, chgKeys);
+
+      // Convert local indices to global indices
+      const ceOiIdx = (ceOiLocalIdx >= 0) ? ceOiLocalIdx : -1;
+      const ceChgIdx = (ceChgLocalIdx >= 0) ? ceChgLocalIdx : -1;
+      const peChgIdx = (peChgLocalIdx >= 0) ? (strikeIdx + 1 + peChgLocalIdx) : -1;
+      const peOiIdx = (peOiLocalIdx >= 0) ? (strikeIdx + 1 + peOiLocalIdx) : -1;
+
+      // values from cells (with fallback heuristics):
+      function numFromCell(idx) {
+        if (idx === -1) return 0;
+        const txt = (cells[idx] || '').replace(/[,₹₹\s]+/g, '');
+        const signMatch = (cells[idx] || '').match(/^\s*[-–]/) ? -1 : 1;
+        const n = Number(txt.match(/-?\d+(\.\d+)?/) ? txt.match(/-?\d+(\.\d+)?/)[0] : NaN);
+        return Number.isFinite(n) ? n * signMatch : 0;
       }
 
-      // If some fields still zero, attempt mapping by proximity (left-most numeric as CE OI, right-most as PE OI)
-      if ((!ceOI || ceOI===0) || (!peOI || peOI===0)) {
-        const nums = tds.map(td => num(td.innerText));
-        // pick left numeric (not very robust but ok)
-        ceOI = ceOI || nums.find(n=>n>0) || 0;
-        peOI = peOI || (nums.slice().reverse().find(n=>n>0) || 0);
-      }
+      const ceOI = (ceOiIdx >= 0) ? numFromCell(ceOiIdx) : (numFromCell(0) || 0);
+      const ceChange = (ceChgIdx >= 0) ? numFromCell(ceChgIdx) : (numFromCell(1) || 0);
 
-      // push if strike valid
-      if (strike && strike>0){
-        parsed.push({
-          strike: Math.round(strike),
-          ceOI: Math.max(0, Math.round(ceOI)),
-          peOI: Math.max(0, Math.round(peOI)),
-          ceChg: Math.round(ceChg || 0),
-          peChg: Math.round(peChg || 0)
-        });
-      }
-    });
+      const peChange = (peChgIdx >= 0) ? numFromCell(peChgIdx) : (numFromCell(cells.length - 2) || 0);
+      const peOI = (peOiIdx >= 0) ? numFromCell(peOiIdx) : (numFromCell(cells.length - 1) || 0);
 
-    // remove duplicates by strike and sort descending (top->bottom decreasing)
-    const map = new Map();
-    parsed.forEach(it => map.set(it.strike, it));
-    const arr = Array.from(map.values()).sort((a,b)=> b.strike - a.strike);
-    return {arr, spot};
-  }
+      // some rows (header separators) might be non-numeric; ignore
+      if (isNaN(strike)) continue;
 
-  /**************************************************************************
-   * Drawing: canvas histogram (4 rows per strike)
-   **************************************************************************/
-  function createCanvas(width=880, height=600){
-    const wrap = document.createElement("div");
-    wrap.style.cssText = "width:100%;height:100%;overflow:auto;";
-    const can = document.createElement("canvas");
-    can.width = width;
-    can.height = height;
-    can.style.width = "100%";
-    can.style.height = "auto";
-    wrap.appendChild(can);
-    return {wrap, can, ctx: can.getContext("2d")};
-  }
-
-  // state for history to compute % change in last 5 minutes
-  const historyStore = new Map(); // key = strike, value = array of {ts, ceOI, peOI, ceChg, peChg}
-
-  function addHistory(snapshot){
-    const ts = Date.now();
-    snapshot.forEach(it=>{
-      if (!historyStore.has(it.strike)) historyStore.set(it.strike, []);
-      historyStore.get(it.strike).push({ts, ceOI:it.ceOI, peOI:it.peOI, ceChg:it.ceChg, peChg:it.peChg});
-      // trim older than HISTORY_WINDOW_MS
-      const arr = historyStore.get(it.strike).filter(x => (ts - x.ts) <= HISTORY_WINDOW_MS);
-      historyStore.set(it.strike, arr);
-    });
-  }
-
-  function pctChangeFrom5Min(strike, field){
-    const arr = historyStore.get(strike) || [];
-    if (arr.length < 2) return null;
-    const oldest = arr[0];
-    const latest = arr[arr.length-1];
-    const oldVal = oldest[field] || 0;
-    const newVal = latest[field] || 0;
-    if (oldVal === 0) return null;
-    return ((newVal - oldVal)/Math.abs(oldVal))*100;
-  }
-
-  // main draw function: expects filteredStrikes array (descending by strike)
-  function drawHistogram(filteredStrikes, spot){
-    // get wrapper
-    const wrapParent = $("#oi-canvas-wrap");
-    if (!wrapParent) return;
-    // calculate canvas size
-    const rows = filteredStrikes.length;
-    const rowHeight = 48; // per strike block height (4 rows stacked vertically)
-    const totalH = Math.max(200, rows * rowHeight + 40);
-
-    // create or reuse canvas
-    const existingCanvas = wrapParent.querySelector("canvas");
-    let can, ctx, wrapperDiv;
-    if (existingCanvas) {
-      can = existingCanvas;
-      ctx = can.getContext("2d");
-      // resize backing store to fit content
-      can.width = Math.max(900, window.innerWidth * 0.9);
-      can.height = totalH;
-    } else {
-      const created = createCanvas(Math.max(900, window.innerWidth * 0.9), totalH);
-      wrapperDiv = created.wrap;
-      can = created.can;
-      ctx = created.ctx;
-      // clear wrapParent and append
-      wrapParent.innerHTML = "";
-      wrapParent.appendChild(wrapperDiv);
-      // ensure scroll within panel
-      created.wrap.style.height = Math.min(520, totalH) + "px";
-    }
-
-    // style constants
-    const leftLabelX = 12;
-    const strikeLabelW = 72;
-    const baselineX = leftLabelX + strikeLabelW + 6; // where bars begin (center vertical at baselineX)
-    const availableW = can.width - baselineX - 40;
-    const centerLineX = baselineX + Math.round(availableW * 0.15); // small left margin for red bars if we want visual separation
-    const barMaxW = availableW - Math.round(availableW*0.05);
-
-    // compute max value for scaling across CE OI & PE OI & changes
-    let maxVal = 1;
-    filteredStrikes.forEach(it=>{
-      maxVal = Math.max(maxVal, Math.abs(it.ceOI||0), Math.abs(it.peOI||0), Math.abs(it.ceChg||0), Math.abs(it.peChg||0));
-    });
-
-    // adjust scale to allow labels inside bars
-    const scale = barMaxW / maxVal;
-
-    // clear canvas
-    ctx.clearRect(0,0,can.width,can.height);
-    // background
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0,0,can.width,can.height);
-
-    // draw horizontal separators
-    ctx.strokeStyle = "#e7e7e7";
-    ctx.lineWidth = 1;
-    for (let i=0;i<=rows;i++){
-      const y = 10 + i * rowHeight + 0;
-      ctx.beginPath();
-      ctx.moveTo(baselineX - 10, y);
-      ctx.lineTo(can.width - 10, y);
-      ctx.stroke();
-    }
-
-    // draw central thin baseline for visual alignment (not required)
-    ctx.strokeStyle = "#f0f0f0";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(centerLineX, 4);
-    ctx.lineTo(centerLineX, can.height-4);
-    ctx.stroke();
-
-    // For each strike draw 4 bars stacked with small gaps
-    filteredStrikes.forEach((it, idx) => {
-      const blockTop = 12 + idx * rowHeight;
-      const labelY = blockTop + 12;
-
-      // strike label
-      ctx.fillStyle = "#111";
-      ctx.font = "bold 14px Arial";
-      ctx.textAlign = "left";
-      ctx.fillText(String(it.strike), leftLabelX, labelY+2);
-
-      // for each of the 4 rows compute Y positions
-      // Row mapping:
-      // r0: CE OI (red)
-      // r1: PE OI (green)
-      // r2: CE change (yellow)
-      // r3: PE change (blue)
-      const rowOffsets = [ -6, 10, 26, 42 ]; // offsets relative to blockTop for small stacking
-      const colors = ["#e53935","#2e7d32","#ffb300","#1565c0"];
-      const fields = ["ceOI","peOI","ceChg","peChg"];
-
-      for (let r=0;r<4;r++){
-        const val = Math.abs(it[fields[r]] || 0); // option A: always positive bars
-        const barW = Math.round(val * scale);
-        const y = blockTop + rowOffsets[r];
-
-        // bar background area (thin muted track)
-        ctx.fillStyle = "#f6f6f6";
-        ctx.fillRect(baselineX, y-8, barMaxW, 12);
-
-        // draw colored bar (extend right from baseline)
-        ctx.fillStyle = colors[r];
-        const drawW = Math.max(0, Math.min(barW, barMaxW));
-        ctx.fillRect(baselineX, y-8, drawW, 12);
-
-        // draw numeric label above bar (centered over bar end)
-        ctx.fillStyle = "#000";
-        ctx.font = "bold 12px Arial";
-        ctx.textAlign = "left";
-        const labelX = baselineX + drawW + 6;
-        ctx.fillText(String(it[fields[r]]), labelX, y-1);
-
-        // compute % change in last 5 minutes for corresponding field (if available)
-        // we'll map ceOI->ceOI, peOI->peOI, ceChg->ceChg, peChg->peChg
-        const pct = pctChangeFrom5Min(it.strike, fields[r]);
-        if (pct !== null){
-          ctx.font = "11px Arial";
-          ctx.fillStyle = pct >= 0 ? "#2e7d32" : "#d32f2f";
-          ctx.textAlign = "left";
-          ctx.fillText((pct>=0?"+":"")+pct.toFixed(1)+"%", labelX, y+11);
-        }
-      }
-    });
-
-    // finally annotate spot/ATM (if available)
-    if (spot && spot>0){
-      ctx.fillStyle = "#333";
-      ctx.font = "12px Arial";
-      ctx.textAlign = "right";
-      ctx.fillText("ATM ~ "+String(Math.round(spot)), can.width - 12, 16);
-    }
-  }
-
-  /**************************************************************************
-   * Main render pipeline: parse -> select strikes -> add history -> draw
-   **************************************************************************/
-  let latestTableRef = null;
-  let lastParsed = {arr:[], spot:0};
-
-  function selectStrikeWindow(allArr, spot, range){
-    if (!allArr || !allArr.length) return [];
-    // find closest strike to spot
-    let midIdx = Math.floor(allArr.length/2);
-    if (spot && spot>0){
-      let bestIdx = 0;
-      let bestDiff = Infinity;
-      allArr.forEach((it, idx)=>{
-        const d = Math.abs(it.strike - spot);
-        if (d < bestDiff){ bestDiff = d; bestIdx = idx; }
+      parsed.push({
+        strike,
+        ceOI,
+        ceChange,
+        peChange,
+        peOI,
+        rawCells: cells,
+        rowEl: row
       });
-      midIdx = bestIdx;
     }
-    const start = clamp(midIdx - range, 0, allArr.length-1);
-    const end = clamp(midIdx + range + 1, 0, allArr.length);
-    // ensure decreasing order (already sorted descending in parser)
-    return allArr.slice(start, end);
+
+    return parsed;
   }
 
-  function renderOnce(){
-    if (!latestTableRef) return;
-    lastParsed = parseTableRows(latestTableRef);
-    const allArr = lastParsed.arr;
-    const spot = lastParsed.spot;
-    if (!allArr || !allArr.length) return;
-    const windowArr = selectStrikeWindow(allArr, spot, strikeRange);
-    // update history
-    addHistory(windowArr);
-    // draw
-    drawHistogram(windowArr, spot);
-  }
-
-  // wrapper for scheduled rendering
-  let refreshTimer = null;
-  function startAutoRefresh(){
-    if (refreshTimer) clearInterval(refreshTimer);
-    refreshTimer = setInterval(renderOnce, REFRESH_MS);
-  }
-
-  /**************************************************************************
-   * Kickoff: wait for table and then attach observer to re-render on changes
-   **************************************************************************/
-  whenTableReady((table) => {
-    if (!table){
-      console.warn("OI Histogram: Option table was not found within timeout.");
-      return;
+  /*********************************************************
+   * State: previous snapshot to compute % change over 5m
+   *********************************************************/
+  const state = {
+    lastSnapshot: null, // {timestamp, map: {strike -> {ceOI, peOI, ceChange, peChange}}}
+    settings: {
+      strikesEachSide: 5,
+      atmCentered: true
     }
-    latestTableRef = table;
-    // initial render
-    const panel = createPanel();
-    renderOnce();
-    startAutoRefresh();
+  };
 
-    // observe DOM changes on table (rows update dynamically)
-    const mo = new MutationObserver((mutList) => {
-      // simply re-render on any significant mutation (fast)
-      latestTableRef = table;
-      renderOnce();
+  function computePercentChange(prev, cur) {
+    if (prev == null || prev === 0) return 0;
+    return ((cur - prev) / Math.abs(prev)) * 100;
+  }
+
+  /*********************************************************
+   * UI: create histogram container
+   *********************************************************/
+  function createUI() {
+    // root container
+    const root = document.createElement('div');
+    root.id = '__nse_oi_histogram';
+    root.style.position = 'fixed';
+    root.style.left = '12px';
+    root.style.top = '80px';
+    root.style.zIndex = 99999;
+    root.style.maxWidth = '92vw';
+    root.style.width = '360px';
+    root.style.boxShadow = '0 6px 20px rgba(0,0,0,0.25)';
+    root.style.borderRadius = '12px';
+    root.style.background = '#ffffff';
+    root.style.fontFamily = 'Inter, system-ui, Arial, sans-serif';
+    root.style.userSelect = 'none';
+    root.style.touchAction = 'none';
+    root.style.display = 'flex';
+    root.style.flexDirection = 'column';
+    root.style.overflow = 'hidden';
+    root.style.paddingBottom = '8px';
+
+    // header
+    const header = document.createElement('div');
+    header.style.background = '#1787FF';
+    header.style.color = 'white';
+    header.style.padding = '12px';
+    header.style.display = 'flex';
+    header.style.alignItems = 'center';
+    header.style.justifyContent = 'space-between';
+    header.style.cursor = 'grab';
+    header.innerHTML = `<div style="font-weight:600">OI Histogram</div><div style="font-weight:600;opacity:0.95;cursor:pointer" id="hist-detach">Detach ✖</div>`;
+    root.appendChild(header);
+
+    // controls row
+    const controls = document.createElement('div');
+    controls.style.display = 'flex';
+    controls.style.alignItems = 'center';
+    controls.style.gap = '10px';
+    controls.style.padding = '10px';
+    controls.style.flexWrap = 'wrap';
+
+    // minus button
+    const minus = document.createElement('button');
+    minus.textContent = '-';
+    Object.assign(minus.style, {
+      width: '36px',
+      height: '36px',
+      borderRadius: '6px',
+      border: '1px solid #ccc',
+      background: '#fff',
+      fontSize: '20px'
     });
-    mo.observe(table, {childList: true, subtree: true, characterData: true});
+    controls.appendChild(minus);
 
-    // also re-select table if user triggers page navigation via the same page
-    window.addEventListener("scroll", throttle( ()=> {
-      // nothing heavy here; keep it to ensure table reference still valid
-      if (!document.body.contains(latestTableRef)){
-        whenTableReady((t2) => { if (t2) latestTableRef = t2; });
+    // strikes label
+    const strikesLabel = document.createElement('div');
+    strikesLabel.textContent = String(state.settings.strikesEachSide);
+    strikesLabel.style.fontWeight = '700';
+    strikesLabel.style.minWidth = '28px';
+    strikesLabel.style.textAlign = 'center';
+    controls.appendChild(strikesLabel);
+
+    // plus
+    const plus = document.createElement('button');
+    plus.textContent = '+';
+    Object.assign(plus.style, {
+      width: '36px',
+      height: '36px',
+      borderRadius: '6px',
+      border: '1px solid #ccc',
+      background: '#fff',
+      fontSize: '20px'
+    });
+    controls.appendChild(plus);
+
+    // ATM center checkbox
+    const atmWrap = document.createElement('label');
+    atmWrap.style.display = 'flex';
+    atmWrap.style.alignItems = 'center';
+    atmWrap.style.gap = '6px';
+    atmWrap.innerHTML = `<input type="checkbox" id="atm_center_chk" ${state.settings.atmCentered ? 'checked' : ''}/> <span style="font-weight:600">ATM center</span>`;
+    controls.appendChild(atmWrap);
+
+    root.appendChild(controls);
+
+    // hint line
+    const hint = document.createElement('div');
+    hint.style.padding = '6px 12px 0 12px';
+    hint.style.fontSize = '12px';
+    hint.style.color = '#555';
+    hint.innerHTML = `ATM centered • CE red • PE green • ΔCE orange • ΔPE blue`;
+    root.appendChild(hint);
+
+    // content: scrollable area for bars
+    const content = document.createElement('div');
+    content.style.padding = '8px 10px';
+    content.style.maxHeight = '52vh';
+    content.style.overflowY = 'auto';
+    content.style.background = '#fff';
+    content.style.borderTop = '1px solid #eee';
+    root.appendChild(content);
+
+    // attach to body
+    document.body.appendChild(root);
+
+    // interactions
+    minus.addEventListener('click', () => {
+      state.settings.strikesEachSide = clamp(state.settings.strikesEachSide - 1, 1, 20);
+      strikesLabel.textContent = String(state.settings.strikesEachSide);
+      renderLast();
+    });
+    plus.addEventListener('click', () => {
+      state.settings.strikesEachSide = clamp(state.settings.strikesEachSide + 1, 1, 20);
+      strikesLabel.textContent = String(state.settings.strikesEachSide);
+      renderLast();
+    });
+
+    $('#atm_center_chk', root).addEventListener('change', (e) => {
+      state.settings.atmCentered = !!e.target.checked;
+      renderLast();
+    });
+
+    // detach: create larger floating full-screen mode (toggle)
+    let detached = false;
+    $('#hist-detach', root).addEventListener('click', () => {
+      detached = !detached;
+      if (detached) {
+        root.style.width = '92vw';
+        root.style.left = '4vw';
+        root.style.top = '10vh';
+        root.style.maxHeight = '80vh';
+        content.style.maxHeight = '65vh';
+        $('#hist-detach', root).textContent = 'Attach ⤺';
+      } else {
+        root.style.width = '360px';
+        root.style.left = '12px';
+        root.style.top = '80px';
+        root.style.maxHeight = '52vh';
+        content.style.maxHeight = '52vh';
+        $('#hist-detach', root).textContent = 'Detach ✖';
       }
-    }, 1000));
+    });
+
+    // Make draggable by header (mobile friendly)
+    (function makeDraggable(el, handle) {
+      let dragging = false, startX = 0, startY = 0, origX = 0, origY = 0;
+      handle.addEventListener('pointerdown', (e) => {
+        dragging = true;
+        handle.setPointerCapture(e.pointerId);
+        startX = e.clientX;
+        startY = e.clientY;
+        origX = parseFloat(el.style.left || 0);
+        origY = parseFloat(el.style.top || 0);
+        handle.style.cursor = 'grabbing';
+      });
+      window.addEventListener('pointermove', (e) => {
+        if (!dragging) return;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        el.style.left = (origX + dx) + 'px';
+        el.style.top = (origY + dy) + 'px';
+      });
+      window.addEventListener('pointerup', (e) => {
+        dragging = false;
+        try { handle.releasePointerCapture(e.pointerId);} catch {}
+        handle.style.cursor = 'grab';
+      });
+    })(root, header);
+
+    // store references
+    return { root, content, header, strikesLabel };
+  }
+
+  const ui = createUI();
+
+  /*********************************************************
+   * Render histogram rows
+   *********************************************************/
+  let lastRenderedParsed = null;
+
+  function renderHistogram(parsedRows) {
+    // sort descending (strike decreasing top->bottom)
+    const sorted = parsedRows.slice().sort((a, b) => b.strike - a.strike);
+
+    // determine ATM: using underlying value on page if available
+    let underlying = null;
+    try {
+      const underlyingEl = Array.from(document.querySelectorAll('body *')).find(el => /Underlying Index/i.test(el.textContent || ''));
+      if (underlyingEl) {
+        const m = (underlyingEl.textContent || '').match(/Underlying\s+Index\s*:\s*.*?([\d,]+(\.\d+)?)/i);
+        if (m) underlying = Number(m[1].replace(/,/g, ''));
+      }
+    } catch (e) {}
+
+    // fallback ATM: choose closest strike to mid of list
+    const strikes = sorted.map(r => r.strike);
+    let atmStrike = null;
+    if (underlying) {
+      atmStrike = strikes.reduce((prev, curr) => Math.abs(curr - underlying) < Math.abs(prev - underlying) ? curr : prev, strikes[0]);
+    } else {
+      atmStrike = strikes[Math.floor(sorted.length / 2)];
+    }
+
+    // select center slice
+    const half = state.settings.strikesEachSide;
+    // find index of atm in sorted
+    const atmIndex = sorted.findIndex(r => r.strike === atmStrike);
+    const centerIndex = (state.settings.atmCentered && atmIndex !== -1) ? atmIndex : Math.floor(sorted.length / 2);
+
+    // compute display window
+    let start = clamp(centerIndex - half, 0, sorted.length - 1);
+    let end = clamp(centerIndex + half, 0, sorted.length - 1);
+    // ensure enough items
+    if (end - start < half * 2) {
+      start = Math.max(0, Math.min(start, Math.max(0, sorted.length - (half * 2 + 1))));
+      end = Math.min(sorted.length - 1, start + half * 2);
+    }
+
+    const visible = sorted.slice(start, end + 1);
+
+    // update content DOM
+    const container = ui.content;
+    container.innerHTML = '';
+
+    // legend row
+    const legend = document.createElement('div');
+    legend.style.display = 'flex';
+    legend.style.justifyContent = 'space-between';
+    legend.style.padding = '6px 4px';
+    legend.style.fontSize = '12px';
+    legend.style.color = '#333';
+    container.appendChild(legend);
+
+    // rows
+    visible.forEach(item => {
+      const rowWrap = document.createElement('div');
+      rowWrap.style.display = 'flex';
+      rowWrap.style.alignItems = 'center';
+      rowWrap.style.gap = '8px';
+      rowWrap.style.padding = '8px 4px';
+      rowWrap.style.borderBottom = '1px solid rgba(0,0,0,0.05)';
+
+      // strike label left
+      const strikeLabel = document.createElement('div');
+      strikeLabel.style.width = '56px';
+      strikeLabel.style.fontWeight = '700';
+      strikeLabel.style.fontSize = '16px';
+      strikeLabel.textContent = item.strike;
+      rowWrap.appendChild(strikeLabel);
+
+      // small left column for mini icons or change percent
+      const leftCol = document.createElement('div');
+      leftCol.style.width = '28px';
+      leftCol.style.textAlign = 'center';
+      leftCol.style.fontSize = '12px';
+      leftCol.style.color = '#333';
+      leftCol.innerHTML = ''; // reserved for markers
+      rowWrap.appendChild(leftCol);
+
+      // bars container
+      const bars = document.createElement('div');
+      bars.style.flex = '1';
+      bars.style.display = 'flex';
+      bars.style.flexDirection = 'column';
+      bars.style.gap = '6px';
+
+      // function to create single bar row with color, value, percent
+      function createBarRow(color, value, percentText) {
+        const br = document.createElement('div');
+        br.style.display = 'flex';
+        br.style.alignItems = 'center';
+        br.style.gap = '10px';
+
+        const barWrap = document.createElement('div');
+        barWrap.style.flex = '1';
+        barWrap.style.height = '18px';
+        barWrap.style.background = '#f1f1f1';
+        barWrap.style.borderRadius = '10px';
+        barWrap.style.position = 'relative';
+        barWrap.style.overflow = 'visible';
+
+        // compute normalized width against max among visible for that metric
+        return { br, barWrap, color, value, percentText };
+      }
+
+      // collect metric values for normalization later
+      rowWrap._metrics = {
+        ce: Math.abs(item.ceOI || 0),
+        pe: Math.abs(item.peOI || 0),
+        dce: Math.abs(item.ceChange || 0),
+        dpe: Math.abs(item.peChange || 0),
+        raw: item
+      };
+
+      bars.appendChild(document.createElement('div')); // placeholder; will replace later
+      rowWrap.appendChild(bars);
+      container.appendChild(rowWrap);
+    });
+
+    // compute maxima per metric across visible
+    const visibles = visible.map(v => ({
+      ce: Math.abs(v.ceOI || 0),
+      pe: Math.abs(v.peOI || 0),
+      dce: Math.abs(v.ceChange || 0),
+      dpe: Math.abs(v.peChange || 0),
+      strike: v.strike
+    }));
+    const maxCe = Math.max(1, ...visibles.map(v => v.ce));
+    const maxPe = Math.max(1, ...visibles.map(v => v.pe));
+    const maxDce = Math.max(1, ...visibles.map(v => v.dce));
+    const maxDpe = Math.max(1, ...visibles.map(v => v.dpe));
+
+    // now re-render each row's bar set with normalized widths
+    Array.from(container.children).forEach((child, idx) => {
+      // skip legend (index 0)
+      if (idx === 0) return;
+      const v = visible[idx - 1];
+      // clear placeholder
+      const strikeLabel = child.children[0];
+      const leftCol = child.children[1];
+      const barsDiv = child.children[2];
+      barsDiv.innerHTML = '';
+
+      // four bars order: CE (red), PE (green), ΔCE (orange), ΔPE (blue)
+      const metrics = [
+        { key: 'ce', color: '#d9534f', label: 'CE', val: v.ceOI, max: maxCe },
+        { key: 'pe', color: '#218838', label: 'PE', val: v.peOI, max: maxPe },
+        { key: 'dce', color: '#ff9800', label: 'ΔCE', val: v.ceChange, max: maxDce },
+        { key: 'dpe', color: '#0d47a1', label: 'ΔPE', val: v.peChange, max: maxDpe }
+      ];
+
+      metrics.forEach(m => {
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.gap = '8px';
+
+        // small value column
+        const valBox = document.createElement('div');
+        valBox.style.width = '46px';
+        valBox.style.fontSize = '12px';
+        valBox.style.fontWeight = '700';
+        valBox.textContent = formatNum(m.val);
+        row.appendChild(valBox);
+
+        // bar wrapper
+        const barWrap = document.createElement('div');
+        barWrap.style.flex = '1';
+        barWrap.style.height = '20px';
+        barWrap.style.background = '#f3f3f3';
+        barWrap.style.borderRadius = '12px';
+        barWrap.style.position = 'relative';
+        barWrap.style.overflow = 'visible';
+
+        const widthPercent = Math.abs(m.val) === 0 ? 2 : clamp((Math.abs(m.val) / (m.max || 1)) * 100, 2, 100);
+        const fill = document.createElement('div');
+        fill.style.height = '100%';
+        fill.style.background = m.color;
+        fill.style.width = widthPercent + '%';
+        fill.style.borderRadius = '12px';
+        fill.style.boxShadow = 'inset 0 -2px 0 rgba(0,0,0,0.06)';
+        fill.style.position = 'relative';
+        fill.style.display = 'flex';
+        fill.style.alignItems = 'center';
+        fill.style.justifyContent = 'flex-end';
+        fill.style.paddingRight = '6px';
+        fill.style.color = '#000';
+        fill.style.fontWeight = '700';
+
+        // show exact value on fill (if space) else to the right
+        const valText = document.createElement('div');
+        valText.style.fontSize = '12px';
+        valText.textContent = formatNum(m.val);
+        // place value inside fill and also show percent change below
+        fill.appendChild(valText);
+        barWrap.appendChild(fill);
+
+        // percent label to the right
+        const pct = document.createElement('div');
+        pct.style.width = '56px';
+        pct.style.fontSize = '12px';
+        // compute % change from previous snapshot if available
+        let pctVal = '-';
+        if (state.lastSnapshot && state.lastSnapshot.map && state.lastSnapshot.map[v.strike]) {
+          const prev = state.lastSnapshot.map[v.strike];
+          let prevVal = prev[m.key] || 0;
+          const curVal = m.val || 0;
+          const pc = computePercentChange(prevVal, curVal);
+          pctVal = formatPercent(pc);
+          pct.style.color = pc >= 0 ? '#138000' : '#d9534f';
+        } else {
+          pctVal = '0.0%';
+          pct.style.color = '#666';
+        }
+        pct.textContent = pctVal;
+
+        row.appendChild(barWrap);
+        row.appendChild(pct);
+        barsDiv.appendChild(row);
+      });
+
+      // highlight ATM row
+      if (v.strike === atmStrike) {
+        child.style.background = 'linear-gradient(90deg, rgba(3,169,244,0.04), transparent)';
+      } else {
+        child.style.background = 'transparent';
+      }
+    });
+
+    // update lastSnapshot (store raw numeric values)
+    const now = Date.now();
+    const map = {};
+    parsedRows.forEach(p => {
+      map[p.strike] = {
+        ce: p.ceOI || 0,
+        pe: p.peOI || 0,
+        dce: p.ceChange || 0,
+        dpe: p.peChange || 0
+      };
+    });
+    // if previous more than 5m old, replace snapshot; else keep previous older for 5-min compares
+    if (!state.lastSnapshot || (now - state.lastSnapshot.timestamp) > 5 * 60 * 1000) {
+      state.lastSnapshot = { timestamp: now, map };
+    } else {
+      // merge (keep older snapshot to compute 5-min change)
+      state.lastSnapshot = { timestamp: state.lastSnapshot.timestamp, map: state.lastSnapshot.map || map };
+    }
+
+    lastRenderedParsed = parsedRows;
+  }
+
+  function renderLast() {
+    if (!lastRenderedParsed) return;
+    renderHistogram(lastRenderedParsed);
+  }
+
+  /*********************************************************
+   * Main updater: parse and render
+   *********************************************************/
+  function updateOnce() {
+    try {
+      const table = findOptionChainTable();
+      if (!table) {
+        // no table yet; clear
+        ui.content.innerHTML = `<div style="padding:16px;color:#666">Option table not found on page.</div>`;
+        return;
+      }
+      const mapping = mapTableColumns(table);
+      if (!mapping || typeof mapping.strikeIndex === 'undefined') {
+        ui.content.innerHTML = `<div style="padding:16px;color:#666">Option table mapping failed — headers changed.</div>`;
+        return;
+      }
+      const parsed = parseRows(table, mapping);
+      if (!parsed || parsed.length === 0) {
+        ui.content.innerHTML = `<div style="padding:16px;color:#666">No option rows found yet.</div>`;
+        return;
+      }
+
+      // store snapshot and render
+      lastRenderedParsed = parsed;
+      renderHistogram(parsed);
+    } catch (err) {
+      console.error('NSE OI histogram error', err);
+    }
+  }
+
+  /*********************************************************
+   * Auto-update: observe DOM changes and interval fallback
+   *********************************************************/
+  // observe the whole document for table updates
+  const observer = new MutationObserver((mutations) => {
+    let touched = false;
+    for (const m of mutations) {
+      if (m.addedNodes && m.addedNodes.length) touched = true;
+      if (m.type === 'characterData') touched = true;
+      if (m.removedNodes && m.removedNodes.length) touched = true;
+      if (touched) break;
+    }
+    if (touched) updateOnce();
   });
 
-  /**************************************************************************
-   * Helpers: throttle
-   **************************************************************************/
-  function throttle(fn, wait){
-    let last = 0;
-    return function(...args){
-      const now = Date.now();
-      if (now - last >= wait){
-        last = now;
-        fn.apply(this, args);
-      }
-    };
-  }
+  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+
+  // fallback interval
+  const pollInterval = setInterval(updateOnce, 4000);
+
+  // initial call (small delay to let page render)
+  setTimeout(updateOnce, 600);
+
+  // expose manual API on window for debugging
+  window.__nseOiHistogram = {
+    update: updateOnce,
+    destroy: () => {
+      observer.disconnect();
+      clearInterval(pollInterval);
+      const el = document.getElementById('__nse_oi_histogram');
+      if (el) el.remove();
+      window.__NSE_OI_HISTOGRAM_INJECTED = false;
+    }
+  };
 
 })();
