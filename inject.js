@@ -1,7 +1,7 @@
 (function () {
     "use strict";
 
-    // Prevent double initialization
+    // Prevent re-load
     if (window.__OI_HISTOGRAM_INIT__) return;
     window.__OI_HISTOGRAM_INIT__ = true;
 
@@ -9,25 +9,25 @@
     let keepATM = true;
     let chart = null;
 
-    // Wait for NSE Option Chain table
+    // Wait until table loads
     function waitForTable(callback) {
         const check = setInterval(() => {
-            const table = document.querySelector(".opttbldata, table");
+            const table = document.querySelector(".opttbldata, table tbody");
             if (table) {
                 clearInterval(check);
                 callback();
             }
-        }, 500);
+        }, 400);
     }
 
-    // Create floating UI panel
+    // UI Panel
     function createPanel() {
         const panel = document.createElement("div");
         panel.id = "oiHistogramPanel";
 
         panel.style.cssText = `
             position: fixed;
-            top: 80px;
+            top: 70px;
             left: 10px;
             width: 92%;
             max-width: 420px;
@@ -41,8 +41,8 @@
 
         panel.innerHTML = `
             <div style="display:flex;justify-content:space-between;
-                         font-size:20px;font-weight:700;padding:8px;
-                         background:#0a73eb;color:white;border-radius:12px;">
+                        font-size:20px;font-weight:700;padding:8px;
+                        background:#0a73eb;color:white;border-radius:12px;">
                 <span>OI Histogram</span>
                 <span id="closeOI" style="cursor:pointer;">✖</span>
             </div>
@@ -58,7 +58,19 @@
                 </label>
             </div>
 
-            <div id="chart" style="margin-top:10px; height: 430px;"></div>
+            <!-- Scroll-safe chart wrapper -->
+            <div id="chartWrapper" 
+                style="
+                    margin-top:10px;
+                    height:70vh;
+                    overflow-y:auto;
+                    overflow-x:hidden;
+                    border:1px solid #ddd;
+                    border-radius:10px;
+                    padding:4px;
+                ">
+                <div id="chart"></div>
+            </div>
         `;
 
         document.body.appendChild(panel);
@@ -85,7 +97,7 @@
 
     createPanel();
 
-    // Extract table data
+    // Extract CE/PE values from table
     function getOptionData() {
         const rows = [...document.querySelectorAll("table tbody tr")];
         const data = [];
@@ -106,7 +118,7 @@
         return data.filter(x => x.strike > 0);
     }
 
-    // Build ApexCharts OI Histogram
+    // Render ApexChart
     function renderHistogram() {
         const data = getOptionData();
         if (!data.length) return;
@@ -131,13 +143,13 @@
             finalData = finalData.slice(0, strikeCount * 2);
         }
 
-        // Build 4 rows per strike
         const categories = [];
         const ceOI = [];
         const peOI = [];
         const ceChg = [];
         const peChg = [];
 
+        // 4 rows per strike
         finalData.forEach(row => {
             categories.push(`${row.strike} CE OI`);
             categories.push(`${row.strike} PE OI`);
@@ -159,18 +171,29 @@
             ],
             chart: {
                 type: "bar",
-                height: categories.length * 40,
-                animations: { enabled: false }
+                height: categories.length * 30, // mobile-safe height
+                animations: { enabled: false },
+                toolbar: { show: false },
+                parentHeightOffset: 0
             },
             colors: ["#ff3b30", "#34c759", "#ff9500", "#007aff"],
             plotOptions: {
-                bar: { horizontal: true, barHeight: "70%" }
+                bar: {
+                    horizontal: true,
+                    barHeight: "60%"
+                }
             },
             dataLabels: {
                 enabled: true,
                 style: { fontSize: "12px", colors: ["#fff"] }
             },
-            xaxis: { categories },
+            xaxis: {
+                categories,
+                labels: { style: { fontSize: "11px" } }
+            },
+            yaxis: {
+                labels: { style: { fontSize: "12px" } }
+            },
             stroke: { show: true, width: 1, colors: ["#fff"] },
             tooltip: { shared: false },
             legend: { position: "top" }
