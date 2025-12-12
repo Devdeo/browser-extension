@@ -1,18 +1,19 @@
 (function () {
 
-console.log("OI Histogram Extension Loaded");
+console.log("OI Histogram Final Version Loaded");
 
-// -------------------------
-// VARIABLES
-// -------------------------
+// -----------------------------------------------------
+// GLOBAL VARIABLES
+// -----------------------------------------------------
 let lastSnapshot = {};
 let lastSnapshotTime = 0;
 let strikesToShow = 5;
 let keepATM = true;
+let renderTimeout = null;
 
-// -------------------------
-// CREATE FLOATING PANEL
-// -------------------------
+// -----------------------------------------------------
+// CREATE FLOATING HISTOGRAM PANEL
+// -----------------------------------------------------
 const box = document.createElement("div");
 box.id = "oi-box";
 box.innerHTML = `
@@ -24,16 +25,17 @@ box.innerHTML = `
     </div>
   </div>
 
-  <div style="display:flex;align-items:center;margin-top:5px;">
+  <div style="display:flex;align-items:center;margin-top:6px;">
     <button id="minusBtn">−</button>
     <span id="strikeCount" style="margin:0 10px;">${strikesToShow}</span>
     <button id="plusBtn">+</button>
+
     <label style="margin-left:10px;">
       <input type="checkbox" id="atmCheck" checked /> ATM center
     </label>
   </div>
 
-  <small id="legendText">
+  <small style="opacity:0.8;">
     ATM centered • CE red • PE green • ΔCE orange • ΔPE blue
   </small>
 
@@ -41,27 +43,31 @@ box.innerHTML = `
 `;
 document.body.appendChild(box);
 
-// -------------------------
+// -----------------------------------------------------
 // DRAGGABLE PANEL
-// -------------------------
+// -----------------------------------------------------
 (function dragElement(elmnt) {
     let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+
     document.getElementById("oi-header").onmousedown = dragMouseDown;
 
     function dragMouseDown(e) {
         e.preventDefault();
-        pos3 = e.clientX; pos4 = e.clientY;
+        pos3 = e.clientX;
+        pos4 = e.clientY;
         document.onmouseup = closeDrag;
-        document.onmousemove = drag;
+        document.onmousemove = dragMove;
     }
 
-    function drag(e) {
+    function dragMove(e) {
         e.preventDefault();
-        pos1 = pos3 - e.clientX; pos2 = pos4 - e.clientY;
-        pos3 = e.clientX; pos4 = e.clientY;
+        pos1 = pos3 - e.clientX;
+        pos2 = pos4 - e.clientY;
+        pos3 = e.clientX;
+        pos4 = e.clientY;
 
-        elmnt.style.top = (elmnt.offsetTop - pos2) + "px";
-        elmnt.style.left = (elmnt.offsetLeft - pos1) + "px";
+        elmnt.style.top = elmnt.offsetTop - pos2 + "px";
+        elmnt.style.left = elmnt.offsetLeft - pos1 + "px";
     }
 
     function closeDrag() {
@@ -70,9 +76,11 @@ document.body.appendChild(box);
     }
 })(box);
 
-// -------------------------
-// BUTTON HANDLERS
-// -------------------------
+// -----------------------------------------------------
+// BUTTON EVENTS
+// -----------------------------------------------------
+document.getElementById("closeBtn").onclick = () => box.remove();
+
 document.getElementById("minusBtn").onclick = () => {
     strikesToShow = Math.max(1, strikesToShow - 1);
     document.getElementById("strikeCount").innerText = strikesToShow;
@@ -80,7 +88,7 @@ document.getElementById("minusBtn").onclick = () => {
 };
 
 document.getElementById("plusBtn").onclick = () => {
-    strikesToShow = strikesToShow + 1;
+    strikesToShow += 1;
     document.getElementById("strikeCount").innerText = strikesToShow;
     render();
 };
@@ -90,11 +98,37 @@ document.getElementById("atmCheck").onchange = (e) => {
     render();
 };
 
-document.getElementById("closeBtn").onclick = () => box.remove();
+// -----------------------------------------------------
+// WAIT FOR TABLE TO FINISH LOADING
+// -----------------------------------------------------
+function waitForTableReady(cb) {
+    let tries = 0;
 
-// -------------------------
-// PARSE TABLE
-// -------------------------
+    const timer = setInterval(() => {
+        const rows = Array.from(document.querySelectorAll("table tbody tr"));
+        const validRows = rows.filter(r => r.children.length >= 21);
+
+        if (validRows.length > 5) {
+            clearInterval(timer);
+            cb();
+        }
+
+        tries++;
+        if (tries > 50) clearInterval(timer); // stop after 10s
+    }, 200);
+}
+
+// -----------------------------------------------------
+// SAFE NUMBER PARSER
+// -----------------------------------------------------
+function num(cell) {
+    if (!cell) return 0;
+    return Number(cell.innerText.replace(/,/g, "")) || 0;
+}
+
+// -----------------------------------------------------
+// PARSE NSE TABLE ROWS
+// -----------------------------------------------------
 function parseTable() {
     let rows = Array.from(document.querySelectorAll("table tbody tr"));
     if (!rows.length) return [];
@@ -102,62 +136,59 @@ function parseTable() {
     let parsed = [];
 
     rows.forEach(r => {
-        let c = r.children;
-        if (c.length < 21) return;
+        const c = r.children;
+        if (!c || c.length < 21) return;
+
+        const strike = num(c[10]);
+        if (!strike) return;
 
         parsed.push({
             ceOI:  num(c[0]),
             ceChg: num(c[1]),
-            strike: num(c[10]),
+            strike: strike,
             peChg: num(c[19]),
             peOI:  num(c[20])
         });
     });
 
-    return parsed.filter(x => x.strike > 0);
+    return parsed;
 }
 
-function num(cell) {
-    if (!cell) return 0;
-    return Number(cell.innerText.replace(/,/g,"")) || 0;
-}
+// -----------------------------------------------------
+// FIND ATM STRIKE
+// -----------------------------------------------------
+function findATM(rows) {
+    const el = document.querySelector(".underlying-value, .niftyFifty .highlight");
+    if (!el) return rows[0].strike;
 
-// -------------------------
-// ATM STRIKE
-// -------------------------
-function findATM(strikes) {
-    let underlyingSpan = document.querySelector(".underlying-value,.underlying-index,.niftyFifty .val span.highlight");
-    if (!underlyingSpan) return strikes[0].strike;
+    let underlying = Number(el.innerText.replace(/,/g, "")) || 0;
+    let closest = rows[0].strike;
 
-    let underlying = Number(underlyingSpan.innerText.replace(/,/g,""));
-    let closest = strikes[0].strike;
-
-    strikes.forEach(s => {
-        if (Math.abs(s.strike - underlying) < Math.abs(closest - underlying))
-            closest = s.strike;
+    rows.forEach(r => {
+        if (Math.abs(r.strike - underlying) < Math.abs(closest - underlying)) {
+            closest = r.strike;
+        }
     });
 
     return closest;
 }
 
-// -------------------------
-// 5-MIN % CHANGE
-// -------------------------
+// -----------------------------------------------------
+// 5-MIN PERCENTAGE CHANGE
+// -----------------------------------------------------
 function pct(newVal, oldVal) {
     if (!oldVal || oldVal === 0) return "";
-    let diff = ((newVal - oldVal) / oldVal) * 100;
-    let color = diff >= 0 ? "green" : "red";
-    return ` <span style="color:${color};font-size:11px">${diff.toFixed(1)}%</span>`;
+    const diff = ((newVal - oldVal) / oldVal) * 100;
+    const col = diff >= 0 ? "green" : "red";
+    return ` <span style="color:${col};font-size:11px">${diff.toFixed(1)}%</span>`;
 }
 
-// -------------------------
+// -----------------------------------------------------
 // RENDER HISTOGRAM
-// -------------------------
+// -----------------------------------------------------
 function render() {
     let data = parseTable();
     if (!data.length) return;
-
-    let atm = findATM(data);
 
     // 5-min snapshot
     const now = Date.now();
@@ -167,35 +198,34 @@ function render() {
         lastSnapshotTime = now;
     }
 
-    // Sort strikes
-    data.sort((a,b) => b.strike - a.strike);
+    data.sort((a, b) => b.strike - a.strike);
 
-    let centerIndex = data.findIndex(s => s.strike === atm);
+    let atm = findATM(data);
+    let centerIndex = data.findIndex(d => d.strike === atm);
     if (centerIndex === -1) centerIndex = Math.floor(data.length / 2);
 
-    let start = keepATM ? Math.max(0, centerIndex - strikesToShow + 1) : 0;
-    let end = start + strikesToShow * 2;
-    let view = data.slice(start, end);
+    let start = keepATM ? Math.max(0, centerIndex - strikesToShow) : 0;
+    let view = data.slice(start, start + strikesToShow * 2);
 
     let html = "";
 
     view.forEach(d => {
-        let old = lastSnapshot[d.strike] || {};
+        const old = lastSnapshot[d.strike] || {};
 
         html += `
         <div class="hist-row">
           <div class="strike">${d.strike}</div>
 
-          <div class="bar ce" style="width:${d.ceOI/40}px;"></div>
+          <div class="bar ce" style="width:${d.ceOI / 40}px"></div>
           <div class="val">${d.ceOI}${pct(d.ceOI, old.ceOI)}</div>
 
-          <div class="bar pe" style="width:${d.peOI/40}px;"></div>
+          <div class="bar pe" style="width:${d.peOI / 40}px"></div>
           <div class="val">${d.peOI}${pct(d.peOI, old.peOI)}</div>
 
-          <div class="bar ce-chg" style="width:${Math.abs(d.ceChg)/30}px;"></div>
+          <div class="bar ce-chg" style="width:${Math.abs(d.ceChg) / 30}px"></div>
           <div class="val">${d.ceChg}${pct(d.ceChg, old.ceChg)}</div>
 
-          <div class="bar pe-chg" style="width:${Math.abs(d.peChg)/30}px;"></div>
+          <div class="bar pe-chg" style="width:${Math.abs(d.peChg) / 30}px"></div>
           <div class="val">${d.peChg}${pct(d.peChg, old.peChg)}</div>
         </div>`;
     });
@@ -203,16 +233,19 @@ function render() {
     document.getElementById("histContainer").innerHTML = html;
 }
 
-// -------------------------
-// AUTO REFRESH USING MUTATION OBSERVER
-// -------------------------
+// -----------------------------------------------------
+// MUTATION OBSERVER WITH 300ms DEBOUNCE
+// -----------------------------------------------------
 const observer = new MutationObserver(() => {
-    try { render(); } catch(e){}
+    clearTimeout(renderTimeout);
+    renderTimeout = setTimeout(render, 300);
 });
+
 observer.observe(document.body, { childList: true, subtree: true });
 
-// First render
-setInterval(render, 1500);
-render();
+// -----------------------------------------------------
+// INITIAL LOAD AFTER TABLE READY
+// -----------------------------------------------------
+waitForTableReady(render);
 
 })();
