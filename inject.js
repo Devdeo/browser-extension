@@ -91,7 +91,7 @@ function renderHistogram() {
     const data = getOptionData();
     if (!data.length) return;
 
-    // ATM logic
+    // ATM detection
     const spotText = document.querySelector("#underlyingValue, .underlying")?.innerText || "";
     const spot = parseFloat(spotText.replace(/[^\d.]/g, "")) || data[Math.floor(data.length / 2)].strike;
 
@@ -102,85 +102,88 @@ function renderHistogram() {
     let finalData = [...data];
     if (keepATM) {
         const mid = finalData.indexOf(atmStrike);
-        finalData = finalData.slice(Math.max(0, mid - strikeCount), Math.min(finalData.length, mid + strikeCount + 1));
+        finalData = finalData.slice(
+            Math.max(0, mid - strikeCount),
+            Math.min(finalData.length, mid + strikeCount + 1)
+        );
     } else {
         finalData = finalData.slice(0, strikeCount * 2);
     }
 
-    const strikes = finalData.map(x => x.strike);
-    const ceOI = finalData.map(x => x.ceOI);
-    const peOI = finalData.map(x => x.peOI);
-    const ceChg = finalData.map(x => x.ceChg);
-    const peChg = finalData.map(x => x.peChg);
+    // --------------------------------------------------------------------
+    // 📌 CREATE 4 ROWS PER STRIKE → NO OVERLAP EVER
+    // --------------------------------------------------------------------
+    const categories = [];
+    const seriesData = [[], [], [], []]; // CE OI, PE OI, CE Chg, PE Chg
 
-    // Clear previous chart
+    finalData.forEach(row => {
+        categories.push(`${row.strike}`);            // CE OI row shows strike
+        categories.push(` `);                        // PE OI row (blank)
+        categories.push(` `);                        // CE Chg row (blank)
+        categories.push(` `);                        // PE Chg row (blank)
+
+        seriesData[0].push(row.ceOI);
+        seriesData[1].push(row.peOI);
+        seriesData[2].push(row.ceChg);
+        seriesData[3].push(row.peChg);
+    });
+
+    // Reset content
     document.querySelector("#oiChartContainer").innerHTML = "";
 
     const options = {
         series: [
-            { name: "CE OI", data: ceOI },
-            { name: "PE OI", data: peOI },
-            { name: "CE Chg", data: ceChg },
-            { name: "PE Chg", data: peChg }
+            { name: "CE OI", data: seriesData[0] },
+            { name: "PE OI", data: seriesData[1] },
+            { name: "CE Chg", data: seriesData[2] },
+            { name: "PE Chg", data: seriesData[3] }
         ],
+
         chart: {
             type: "bar",
-            height: strikes.length * 50,
+            height: categories.length * 30,
             stacked: false,
             animations: { enabled: false },
             toolbar: { show: false }
         },
+
+        colors: ["#ff3b30", "#34c759", "#ff9500", "#0066ff"],
+
         plotOptions: {
             bar: {
                 horizontal: true,
-                barHeight: "30%",         // smaller bar
-                rangeBarOverlap: false
+                barHeight: "50%",
+                // 🔥 This ensures 4 bars stay separated vertically
+                distributed: true
             }
         },
-        // 👉 Offsets to fix overlap (magical part)
+
+        xaxis: {
+            categories,
+            labels: {
+                style: { fontSize: "14px", fontWeight: 700 }
+            }
+        },
+
+        yaxis: {
+            labels: {
+                style: { fontSize: "14px", fontWeight: 600 }
+            }
+        },
+
         dataLabels: {
             enabled: true,
-            formatter: (val) => val.toLocaleString(),
-            style: { fontSize: "12px", fontWeight: "600" },
-            offsetY: 0
+            formatter: val => val.toLocaleString(),
+            style: { fontSize: "11px", fontWeight: "500" }
         },
-        // CUSTOM OFFSETS PER SERIES
-        // (CE OI top, PE OI slightly lower, CE Chg slightly lower, PE Chg lowest)
-        seriesOffsets: [
-            15,   // CE OI
-            5,    // PE OI
-            -5,   // CE Chg
-            -15   // PE Chg
-        ],
-        // Inject offsets after rendering
-        tooltip: { shared: false },
-        xaxis: {
-            categories: strikes,
-            labels: { style: { fontSize: "13px" } }
-        },
-        yaxis: {
-            labels: { style: { fontSize: "14px", fontWeight: 600 } }
-        },
-        colors: ["#ff3b30", "#34c759", "#ff9500", "#0050ff"],
+
         legend: {
-            position: "top",
-            fontSize: "14px"
+            position: "top"
         }
     };
 
     chart = new ApexCharts(document.querySelector("#oiChartContainer"), options);
-
-    chart.render().then(() => {
-        // Apply Y-offset manually
-        const offsets = options.seriesOffsets;
-
-        document.querySelectorAll(".apexcharts-bar-series").forEach((series, i) => {
-            const offset = offsets[i];
-            series.querySelectorAll(".apexcharts-bar-area").forEach(bar => {
-                bar.setAttribute("transform", `translate(0, ${offset})`);
-            });
-        });
-    });
+    chart.render();
 }
 
 
