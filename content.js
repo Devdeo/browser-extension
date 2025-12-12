@@ -1,6 +1,8 @@
-// content.js - injects inject.js into page context
-const script = document.createElement('script');
-script.src = chrome.runtime.getURL('inject.js');
-script.type = 'text/javascript';
-script.onload = function(){ this.remove(); };
-(document.head || document.documentElement).appendChild(script);
+function injectScript(file) {
+    const s = document.createElement('script');
+    s.src = chrome.runtime.getURL(file);
+    s.onload = () => s.remove();
+    document.documentElement.appendChild(s);
+}
+
+injectScript("inject.js");
