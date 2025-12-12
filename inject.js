@@ -1,7 +1,6 @@
 (function () {
     "use strict";
 
-    // Prevent re-load
     if (window.__OI_HISTOGRAM_INIT__) return;
     window.__OI_HISTOGRAM_INIT__ = true;
 
@@ -9,48 +8,29 @@
     let keepATM = true;
     let chart = null;
 
-    // Wait until table loads
     function waitForTable(callback) {
         const check = setInterval(() => {
-            const table = document.querySelector(".opttbldata, table tbody");
-            if (table) {
+            if (document.querySelector(".opttbldata, table tbody")) {
                 clearInterval(check);
                 callback();
             }
         }, 400);
     }
 
-    // UI Panel
     function createPanel() {
         const panel = document.createElement("div");
         panel.id = "oiHistogramPanel";
 
-        panel.style.cssText = `
-            position: fixed;
-            top: 70px;
-            left: 10px;
-            width: 92%;
-            max-width: 420px;
-            background: #fff;
-            border-radius: 16px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.25);
-            z-index: 999999;
-            padding: 12px;
-            font-family: sans-serif;
-        `;
-
         panel.innerHTML = `
-            <div style="display:flex;justify-content:space-between;
-                        font-size:20px;font-weight:700;padding:8px;
-                        background:#0a73eb;color:white;border-radius:12px;">
+            <div id="oiPanelHeader">
                 <span>OI Histogram</span>
                 <span id="closeOI" style="cursor:pointer;">✖</span>
             </div>
 
-            <div style="margin-top:10px;display:flex;align-items:center;gap:12px;">
-                <button id="minusStrike" style="font-size:22px;">−</button>
-                <span id="strikeCountTxt" style="font-size:18px;">${strikeCount}</span>
-                <button id="plusStrike" style="font-size:22px;">+</button>
+            <div id="oiControls">
+                <button class="oi-btn" id="minusStrike">−</button>
+                <span id="strikeCountTxt">${strikeCount}</span>
+                <button class="oi-btn" id="plusStrike">+</button>
 
                 <label style="margin-left:10px;">
                     <input type="checkbox" id="keepATMChk" checked>
@@ -58,18 +38,8 @@
                 </label>
             </div>
 
-            <!-- Scroll-safe chart wrapper -->
-            <div id="chartWrapper" 
-                style="
-                    margin-top:10px;
-                    height:70vh;
-                    overflow-y:auto;
-                    overflow-x:hidden;
-                    border:1px solid #ddd;
-                    border-radius:10px;
-                    padding:4px;
-                ">
-                <div id="chart"></div>
+            <div id="chartWrapper">
+                 <div id="oiChartContainer"></div>
             </div>
         `;
 
@@ -97,7 +67,6 @@
 
     createPanel();
 
-    // Extract CE/PE values from table
     function getOptionData() {
         const rows = [...document.querySelectorAll("table tbody tr")];
         const data = [];
@@ -118,12 +87,10 @@
         return data.filter(x => x.strike > 0);
     }
 
-    // Render ApexChart
     function renderHistogram() {
         const data = getOptionData();
         if (!data.length) return;
 
-        // Find ATM strike
         const spotText = document.querySelector("#underlyingValue, .underlying")?.innerText || "";
         const spot = parseFloat(spotText.replace(/[^\d.]/g, "")) || data[Math.floor(data.length / 2)].strike;
 
@@ -132,24 +99,16 @@
         );
 
         let finalData = [...data];
-
         if (keepATM) {
             const mid = finalData.indexOf(atmStrike);
-            finalData = finalData.slice(
-                Math.max(0, mid - strikeCount),
-                Math.min(finalData.length, mid + strikeCount + 1)
-            );
+            finalData = finalData.slice(Math.max(0, mid - strikeCount), Math.min(finalData.length, mid + strikeCount + 1));
         } else {
             finalData = finalData.slice(0, strikeCount * 2);
         }
 
         const categories = [];
-        const ceOI = [];
-        const peOI = [];
-        const ceChg = [];
-        const peChg = [];
+        const ceOI = [], peOI = [], ceChg = [], peChg = [];
 
-        // 4 rows per strike
         finalData.forEach(row => {
             categories.push(`${row.strike} CE OI`);
             categories.push(`${row.strike} PE OI`);
@@ -162,6 +121,9 @@
             peChg.push(row.peChg);
         });
 
+        // Reset old chart before rendering new
+        document.querySelector("#oiChartContainer").innerHTML = "";
+
         const options = {
             series: [
                 { name: "CE OI", data: ceOI },
@@ -171,39 +133,24 @@
             ],
             chart: {
                 type: "bar",
-                height: categories.length * 30, // mobile-safe height
+                height: categories.length * 30,
                 animations: { enabled: false },
-                toolbar: { show: false },
-                parentHeightOffset: 0
+                toolbar: { show: false }
             },
             colors: ["#ff3b30", "#34c759", "#ff9500", "#007aff"],
             plotOptions: {
-                bar: {
-                    horizontal: true,
-                    barHeight: "60%"
-                }
+                bar: { horizontal: true, barHeight: "60%" }
             },
             dataLabels: {
                 enabled: true,
                 style: { fontSize: "12px", colors: ["#fff"] }
             },
-            xaxis: {
-                categories,
-                labels: { style: { fontSize: "11px" } }
-            },
-            yaxis: {
-                labels: { style: { fontSize: "12px" } }
-            },
-            stroke: { show: true, width: 1, colors: ["#fff"] },
-            tooltip: { shared: false },
-            legend: { position: "top" }
+            xaxis: { categories },
+            yaxis: { labels: { style: { fontSize: "12px" } } }
         };
 
-        if (chart) chart.updateOptions(options);
-        else {
-            chart = new ApexCharts(document.querySelector("#chart"), options);
-            chart.render();
-        }
+        chart = new ApexCharts(document.querySelector("#oiChartContainer"), options);
+        chart.render();
     }
 
     waitForTable(() => {
