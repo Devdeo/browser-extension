@@ -26,16 +26,24 @@
             border-radius: 16px;
             box-shadow: 0 4px 20px rgba(0,0,0,0.3);
             z-index: 9999999;
-            padding: 12px;
+            padding: 0;
             font-family: sans-serif;
+            overflow: hidden;
+            transition: height 0.25s ease, opacity 0.25s ease;
         `;
 
         panel.innerHTML = `
-            <div style="display:flex;justify-content:space-between;
-                font-size:20px;font-weight:700;padding:8px;
+            <div id="oiHeader" 
+                style="display:flex;justify-content:space-between;align-items:center;
+                font-size:20px;font-weight:700;padding:8px 12px;
                 background:#0a73eb;color:white;border-radius:12px;">
+                
                 <span>OI Histogram</span>
-                <span id="closeOI" style="cursor:pointer;">✖</span>
+
+                <div style="display:flex;gap:12px;align-items:center;">
+                    <span id="toggleMin" style="cursor:pointer;font-size:18px;">—</span>
+                    <span id="closeOI" style="cursor:pointer;font-size:18px;">✖</span>
+                </div>
             </div>
 
             <div id="oiContainer"
@@ -46,7 +54,35 @@
         `;
 
         document.body.appendChild(panel);
-        document.getElementById("closeOI").onclick = () => panel.remove();
+
+        const container = document.getElementById("oiContainer");
+        const header = document.getElementById("oiHeader");
+        const toggleBtn = document.getElementById("toggleMin");
+        const closeBtn = document.getElementById("closeOI");
+
+        let minimized = false;
+        let fullHeight = 500;
+
+        // Save full height after render
+        setTimeout(() => {
+            fullHeight = panel.offsetHeight;
+        }, 300);
+
+        toggleBtn.onclick = () => {
+            minimized = !minimized;
+
+            if (minimized) {
+                container.style.display = "none";
+                panel.style.height = "48px";
+                toggleBtn.innerText = "+";
+            } else {
+                container.style.display = "block";
+                panel.style.height = fullHeight + "px";
+                toggleBtn.innerText = "—";
+            }
+        };
+
+        closeBtn.onclick = () => panel.remove();
     }
 
     createPanel();
@@ -55,33 +91,29 @@
         return parseInt(v.replace(/,/g, "")) || 0;
     }
 
-    // ================================================
-    // CORRECT COLUMN MAPPING FOR NSE OPTION CHAIN TABLE
-    // ================================================
     function getOptionData() {
         const rows = [...document.querySelectorAll("table tbody tr")];
         const data = [];
 
         rows.forEach(r => {
             const c = r.querySelectorAll("td");
-            if (c.length < 21) return;  // ensure row fully exists
+            if (c.length < 21) return;
 
             data.push({
-                ceOI:  parseNumber(c[1].innerText),   // Calls OI
-                ceChg: parseNumber(c[2].innerText),   // Calls Chng in OI
-                strike: parseNumber(c[11].innerText), // Strike price
-                peChg: parseNumber(c[20].innerText),  // Puts Chng in OI
-                peOI:  parseNumber(c[21].innerText)   // Puts OI
+                ceOI: parseNumber(c[1].innerText),
+                ceChg: parseNumber(c[2].innerText),
+                strike: parseNumber(c[11].innerText),
+                peChg: parseNumber(c[20].innerText),
+                peOI: parseNumber(c[21].innerText)
             });
         });
 
         return data.filter(x => x.strike > 0);
     }
 
-    // Convert value → proportional pixel width
     function barWidth(value, max) {
         if (max === 0) return 0;
-        return Math.max(8, (value / max) * 250); // max bar = 250px
+        return Math.max(8, (value / max) * 250);
     }
 
     function renderHTMLBars() {
@@ -112,25 +144,21 @@
                         ${row.strike.toLocaleString()}
                     </div>
 
-                    <!-- CE OI -->
                     <div style="display:flex;align-items:center;margin:4px 0;">
                         <div style="width:${barWidth(row.ceOI,maxVal)}px;height:12px;background:#ff3030;border-radius:6px;"></div>
                         <span style="margin-left:6px;font-size:13px;">${row.ceOI.toLocaleString()}</span>
                     </div>
 
-                    <!-- PE OI -->
                     <div style="display:flex;align-items:center;margin:4px 0;">
                         <div style="width:${barWidth(row.peOI,maxVal)}px;height:12px;background:#16c784;border-radius:6px;"></div>
                         <span style="margin-left:6px;font-size:13px;">${row.peOI.toLocaleString()}</span>
                     </div>
 
-                    <!-- CE Chg OI -->
                     <div style="display:flex;align-items:center;margin:4px 0;">
                         <div style="width:${barWidth(row.ceChg,maxVal)}px;height:12px;background:#ffb300;border-radius:6px;"></div>
                         <span style="margin-left:6px;font-size:13px;">${row.ceChg.toLocaleString()}</span>
                     </div>
 
-                    <!-- PE Chg OI -->
                     <div style="display:flex;align-items:center;margin:4px 0;">
                         <div style="width:${barWidth(row.peChg,maxVal)}px;height:12px;background:#0066ff;border-radius:6px;"></div>
                         <span style="margin-left:6px;font-size:13px;">${row.peChg.toLocaleString()}</span>
