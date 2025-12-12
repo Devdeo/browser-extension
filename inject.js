@@ -6,15 +6,17 @@
 
     let chart = null;
 
+    // Wait for NSE option chain table
     function waitForTable(callback) {
         const check = setInterval(() => {
-            if (document.querySelector(".opttbldata, table tbody")) {
+            if (document.querySelector("table tbody")) {
                 clearInterval(check);
                 callback();
             }
         }, 400);
     }
 
+    // Create floating panel
     function createPanel() {
         const panel = document.createElement("div");
         panel.id = "oiHistogramPanel";
@@ -24,10 +26,10 @@
             left: 10px;
             width: 92%;
             max-width: 420px;
-            background: #ffffff;
+            background: #fff;
             border-radius: 16px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.25);
-            z-index: 999999;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            z-index: 9999999;
             padding: 12px;
             font-family: sans-serif;
         `;
@@ -53,10 +55,7 @@
 
     createPanel();
 
-
-    // ===================================================================
-    // READ ALL STRIKES (not only 5)
-    // ===================================================================
+    // Extract table data (ALL STRIKES)
     function getOptionData() {
         const rows = [...document.querySelectorAll("table tbody tr")];
         const data = [];
@@ -77,39 +76,45 @@
         return data.filter(x => x.strike > 0);
     }
 
+    // ============================
+    // APPLY VERTICAL BAR OFFSETS
+    // ============================
+    function applyVerticalOffsets(chartCtx) {
+        const offsets = [ -16, -4, 8, 20 ];  
+        // CE OI, PE OI, CE Chg, PE Chg positions
 
+        setTimeout(() => {
+            const barGroups = chartCtx.el.querySelectorAll(".apexcharts-series");
 
+            barGroups.forEach((series, i) => {
+                const offset = offsets[i];
+                series.querySelectorAll(".apexcharts-bar-area").forEach(bar => {
+                    bar.setAttribute(
+                        "transform",
+                        `translate(0, ${offset})`
+                    );
+                });
+            });
+        }, 50);
+    }
 
-
-    // ===================================================================
-    // FINAL FIXED VISUAL CHART (perfect width + spacing + all strikes)
-    // ===================================================================
+    // ============================
+    // RENDER FINAL PERFECT CHART
+    // ============================
     function renderHistogram() {
-
         const data = getOptionData();
         if (!data.length) return;
 
-        // Sort strikes (low → high)
+        // Sort strikes numerically (ascending)
         data.sort((a, b) => a.strike - b.strike);
 
-        // 4 rows per strike → best visual separation
-        const categories = [];
-        const ceOI = [], peOI = [], ceChg = [], peChg = [];
-
-        data.forEach(row => {
-            categories.push(String(row.strike));   // strike label row
-            categories.push("");                  // blank row
-            categories.push("");
-            categories.push("");
-
-            ceOI.push(row.ceOI);
-            peOI.push(row.peOI);
-            ceChg.push(row.ceChg);
-            peChg.push(row.peChg);
-        });
+        const strikes = data.map(x => x.strike);
+        const ceOI = data.map(x => x.ceOI);
+        const peOI = data.map(x => x.peOI);
+        const ceChg = data.map(x => x.ceChg);
+        const peChg = data.map(x => x.peChg);
 
         document.querySelector("#oiChartContainer").innerHTML = "";
-
 
         const options = {
             series: [
@@ -121,80 +126,69 @@
 
             chart: {
                 type: "bar",
-                height: categories.length * 38,   // spacing fixed
+                height: strikes.length * 55,
                 stacked: false,
                 animations: { enabled: false },
-                toolbar: { show: false }
-            },
+                toolbar: { show: false },
 
-            // ⭐ PERFECT BAR LOOK
-            plotOptions: {
-                bar: {
-                    horizontal: true,
-                    barHeight: "60%",   // wider bars
-                    borderRadius: 4,
-                    distributed: false
+                events: {
+                    mounted: applyVerticalOffsets,
+                    updated: applyVerticalOffsets
                 }
             },
 
-            // ⭐ HIGH-VISIBILITY COLORS (NO BLUR)
             colors: [
-                "#ff3030",  // CE OI
-                "#16c784",  // PE OI
-                "#ffb300",  // CE Chg
-                "#0066ff"   // PE Chg
+                "#ff3030",  // CE OI red
+                "#16c784",  // PE OI green
+                "#ffb300",  // CE Chg yellow
+                "#0066ff"   // PE Chg blue
             ],
 
-            // ⭐ LABELS
+            plotOptions: {
+                bar: {
+                    horizontal: true,
+                    barHeight: "40%",  
+                    borderRadius: 4
+                }
+            },
+
             dataLabels: {
                 enabled: true,
-                formatter: val => (val ? val.toLocaleString() : ""),
-                style: {
-                    fontSize: "12px",
-                    fontWeight: 700,
-                    colors: ["#000"]
-                },
+                formatter: v => (v ? v.toLocaleString() : ""),
+                style: { fontSize: "12px", fontWeight: "700", colors: ["#000"] },
                 offsetX: 6
             },
 
             xaxis: {
-                categories,
+                categories: strikes,
                 labels: {
-                    style: { fontSize: "14px", fontWeight: 700 }
-                },
-                decimalsInFloat: 0
+                    style: { fontSize: "14px", fontWeight: "700" }
+                }
             },
 
             yaxis: {
                 labels: {
-                    style: { fontSize: "15px", fontWeight: 700 }
+                    style: { fontSize: "15px", fontWeight: "700" }
                 }
+            },
+
+            grid: {
+                strokeDashArray: 3,
+                borderColor: "#ccc"
             },
 
             legend: {
                 position: "top",
                 fontSize: "14px",
-                markers: {
-                    width: 14,
-                    height: 14,
-                    radius: 4
-                }
-            },
-
-            grid: {
-                strokeDashArray: 4,
-                borderColor: "#ccc"
+                markers: { width: 14, height: 14, radius: 4 }
             }
         };
-
 
         chart = new ApexCharts(document.querySelector("#oiChartContainer"), options);
         chart.render();
     }
 
-
-
-    // auto refresh
+    // Auto refresh
     waitForTable(() => {
         renderHistogram();
         setInterval(renderHistogram, 3000);
