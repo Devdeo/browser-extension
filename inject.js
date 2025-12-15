@@ -1,150 +1,243 @@
-
 (function () {
     "use strict";
 
     if (window.__OI_HISTOGRAM_INIT__) return;
     window.__OI_HISTOGRAM_INIT__ = true;
 
-    /* ================= WAIT FOR TABLE ================= */
+    /* ============================================================
+       WAIT FOR NSE TABLE
+    ============================================================ */
     function waitForTable(cb) {
-        const i = setInterval(() => {
-            if (document.querySelector("table tbody tr td")) {
-                clearInterval(i);
+        const t = setInterval(() => {
+            const rows = document.querySelectorAll("table tbody tr td");
+            if (rows.length > 0) {
+                clearInterval(t);
                 cb();
             }
         }, 400);
     }
 
-    /* ================= DRAG ================= */
-    function makePanelDraggable(panel, header) {
-        let d = false, ox = 0, oy = 0;
-        const start = (x, y) => { d = true; ox = x - panel.offsetLeft; oy = y - panel.offsetTop; };
-        const move = (x, y) => d && (panel.style.left = x - ox + "px", panel.style.top = y - oy + "px");
-        const end = () => d = false;
+    /* ============================================================
+       DRAGGABLE PANEL
+    ============================================================ */
+    function makeDraggable(panel, header) {
+        let down = false, ox = 0, oy = 0;
 
-        header.addEventListener("mousedown", e => start(e.clientX, e.clientY));
-        document.addEventListener("mousemove", e => move(e.clientX, e.clientY));
-        document.addEventListener("mouseup", end);
+        header.addEventListener("mousedown", e => {
+            down = true;
+            ox = e.clientX - panel.offsetLeft;
+            oy = e.clientY - panel.offsetTop;
+        });
+
+        document.addEventListener("mousemove", e => {
+            if (!down) return;
+            panel.style.left = (e.clientX - ox) + "px";
+            panel.style.top = (e.clientY - oy) + "px";
+        });
+
+        document.addEventListener("mouseup", () => down = false);
 
         header.addEventListener("touchstart", e => {
-            const t = e.touches[0]; start(t.clientX, t.clientY);
+            const t = e.touches[0];
+            down = true;
+            ox = t.clientX - panel.offsetLeft;
+            oy = t.clientY - panel.offsetTop;
         });
+
         document.addEventListener("touchmove", e => {
-            const t = e.touches[0]; t && move(t.clientX, t.clientY);
+            if (!down) return;
+            const t = e.touches[0];
+            panel.style.left = (t.clientX - ox) + "px";
+            panel.style.top = (t.clientY - oy) + "px";
         });
-        document.addEventListener("touchend", end);
+
+        document.addEventListener("touchend", () => down = false);
     }
 
-    /* ================= PANEL ================= */
+    /* ============================================================
+       CREATE PANEL
+    ============================================================ */
     function createPanel() {
         const p = document.createElement("div");
         p.id = "oiHistogramPanel";
         p.style.cssText = `
-            position:fixed;top:70px;left:10px;width:92%;max-width:420px;
+            position:fixed;top:70px;left:10px;
+            width:92%;max-width:420px;
             background:#fff;border-radius:16px;
             box-shadow:0 4px 20px rgba(0,0,0,.3);
-            z-index:9999999;font-family:sans-serif;overflow:hidden;
+            z-index:9999999;font-family:sans-serif;
+            overflow:hidden;
         `;
 
         p.innerHTML = `
-            <div id="oiHeader" style="background:#0a73eb;color:#fff;
-                 padding:8px 12px;font-weight:700;cursor:grab;
-                 display:flex;justify-content:space-between">
+            <div id="oiHeader" style="
+                background:#0a73eb;color:#fff;
+                padding:8px 12px;font-weight:700;
+                cursor:grab;display:flex;
+                justify-content:space-between">
                 <span>OI Histogram</span>
                 <span id="oiClose" style="cursor:pointer">✖</span>
             </div>
-            <div id="oiContainer" style="height:70vh;overflow:auto;padding:10px">
-                Loading…
+            <div id="oiContainer" style="
+                height:70vh;overflow:auto;
+                padding:10px">
+                Loading NSE data…
             </div>
         `;
 
         document.body.appendChild(p);
-        p.querySelector("#oiClose").onclick = () => p.remove();
-        makePanelDraggable(p, p.querySelector("#oiHeader"));
+        document.getElementById("oiClose").onclick = () => p.remove();
+        makeDraggable(p, document.getElementById("oiHeader"));
     }
 
     createPanel();
 
-    /* ================= UTILS ================= */
-    const num = v => parseInt(v.replace(/,/g, "")) || 0;
-    const bw = (v, m) => m ? Math.max(8, (v / m) * 240) : 0;
+    /* ============================================================
+       UTILITIES
+    ============================================================ */
+    const num = v => parseInt((v || "").replace(/,/g, "")) || 0;
+    const barW = (v, m) => m ? Math.max(8, (v / m) * 240) : 0;
 
-    /* ================= READ DATA ================= */
+    /* ============================================================
+       READ OPTION CHAIN (CORRECT MAP)
+    ============================================================ */
     function getOptionData() {
-        return [...document.querySelectorAll("table tbody tr")]
-            .map(r => {
-                const c = r.querySelectorAll("td");
-                if (c.length < 22) return null;
-                return {
-                    ceOI: num(c[1].innerText),
-                    ceChg: num(c[2].innerText),
-                    strike: num(c[11].innerText),
-                    peChg: num(c[20].innerText),
-                    peOI: num(c[21].innerText)
-                };
-            }).filter(Boolean);
+        const rows = document.querySelectorAll("table tbody tr");
+        const out = [];
+
+        rows.forEach(r => {
+            const c = r.querySelectorAll("td");
+            if (c.length < 22) return;
+
+            const strike = num(c[11].innerText);
+            if (!strike) return;
+
+            out.push({
+                strike,
+                ceOI: num(c[1].innerText),
+                ceChg: num(c[2].innerText),
+                peChg: num(c[20].innerText),
+                peOI: num(c[21].innerText)
+            });
+        });
+
+        return out;
     }
 
-    /* ================= RENDER ================= */
-    function renderHTMLBars() {
+    /* ============================================================
+       SAFE RENDER (RETRY LOGIC)
+    ============================================================ */
+    function renderHTMLBars(retry = 0) {
         const box = document.getElementById("oiContainer");
-        const d = getOptionData();
-        if (!d.length) return box.innerHTML = "Waiting for data…";
+        const rows = document.querySelectorAll("table tbody tr");
 
-        d.sort((a, b) => b.strike - a.strike);
-        const max = Math.max(...d.flatMap(x => [x.ceOI, x.peOI, x.ceChg, x.peChg]));
+        if (rows.length < 5) {
+            if (retry < 12) {
+                box.innerHTML = "Loading option chain…";
+                setTimeout(() => renderHTMLBars(retry + 1), 400);
+            }
+            return;
+        }
 
-        box.innerHTML = d.map(x => `
-            <div style="margin-bottom:14px;border-bottom:1px dashed #ddd">
-                <b>${x.strike}</b>
-                <div><div style="width:${bw(x.ceOI,max)}px;height:10px;background:#ff3030"></div>${x.ceOI}</div>
-                <div><div style="width:${bw(x.peOI,max)}px;height:10px;background:#16c784"></div>${x.peOI}</div>
-                <div><div style="width:${bw(x.ceChg,max)}px;height:10px;background:#ffb300"></div>${x.ceChg}</div>
-                <div><div style="width:${bw(x.peChg,max)}px;height:10px;background:#0066ff"></div>${x.peChg}</div>
+        const data = getOptionData();
+
+        if (!data.length) {
+            if (retry < 12) {
+                box.innerHTML = "Syncing data…";
+                setTimeout(() => renderHTMLBars(retry + 1), 400);
+            }
+            return;
+        }
+
+        data.sort((a, b) => b.strike - a.strike);
+
+        const max = Math.max(
+            ...data.flatMap(d => [d.ceOI, d.peOI, d.ceChg, d.peChg])
+        );
+
+        box.innerHTML = data.map(d => `
+            <div style="margin-bottom:14px;
+                        border-bottom:1px dashed #ddd;
+                        padding-bottom:6px">
+                <div style="font-weight:700;font-size:18px">
+                    ${d.strike}
+                </div>
+
+                <div>
+                    <div style="width:${barW(d.ceOI,max)}px;
+                                height:10px;background:#ff3030"></div>
+                    CE OI: ${d.ceOI}
+                </div>
+
+                <div>
+                    <div style="width:${barW(d.peOI,max)}px;
+                                height:10px;background:#16c784"></div>
+                    PE OI: ${d.peOI}
+                </div>
+
+                <div>
+                    <div style="width:${barW(d.ceChg,max)}px;
+                                height:10px;background:#ffb300"></div>
+                    CE Δ: ${d.ceChg}
+                </div>
+
+                <div>
+                    <div style="width:${barW(d.peChg,max)}px;
+                                height:10px;background:#0066ff"></div>
+                    PE Δ: ${d.peChg}
+                </div>
             </div>
         `).join("");
     }
 
-    /* ================= AUTO SYNC ================= */
-    function enableInstantSync() {
-        const tb = document.querySelector("table tbody");
-        if (!tb) return;
-        let last = tb.innerText;
+    /* ============================================================
+       AUTO SYNC WHEN TABLE CHANGES (DEBOUNCED)
+    ============================================================ */
+    function bindTableObserver() {
+        const tbody = document.querySelector("table tbody");
+        if (!tbody || tbody.__OI_OBS__) return;
+
+        tbody.__OI_OBS__ = true;
+        let timer;
+
         new MutationObserver(() => {
-            if (tb.innerText !== last) {
-                last = tb.innerText;
-                renderHTMLBars();
-            }
-        }).observe(tb, { childList: true, subtree: true });
+            clearTimeout(timer);
+            timer = setTimeout(() => renderHTMLBars(0), 300);
+        }).observe(tbody, { childList: true, subtree: true });
     }
 
-    /* ================= REFRESH FIX ================= */
+    /* ============================================================
+       NSE REFRESH BUTTON FIX (ANCHOR)
+    ============================================================ */
     function bindNSERefreshButton() {
         const a = document.querySelector("a[onclick*='refreshOCPage']");
         if (!a || a.__OI_BOUND__) return;
+
         a.__OI_BOUND__ = true;
         a.addEventListener("click", () => {
-            setTimeout(renderHTMLBars, 1500);
+            setTimeout(() => renderHTMLBars(0), 800);
         });
     }
 
-    new MutationObserver(bindNSERefreshButton)
-        .observe(document.body, { childList: true, subtree: true });
-
-    /* ================= MONITOR TABLE ================= */
+    /* ============================================================
+       GLOBAL DOM MONITOR
+    ============================================================ */
     new MutationObserver(() => {
         if (document.querySelector("table tbody")) {
-            enableInstantSync();
-            renderHTMLBars();
+            bindTableObserver();
             bindNSERefreshButton();
+            renderHTMLBars(0);
         }
     }).observe(document.body, { childList: true, subtree: true });
 
-    /* ================= INIT ================= */
+    /* ============================================================
+       INIT
+    ============================================================ */
     waitForTable(() => {
-        renderHTMLBars();
-        enableInstantSync();
+        bindTableObserver();
         bindNSERefreshButton();
+        renderHTMLBars(0);
     });
 
 })();
+
