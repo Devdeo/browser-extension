@@ -1,198 +1,297 @@
+
 (function () {
     "use strict";
 
     if (window.__OI_HISTOGRAM_INIT__) return;
     window.__OI_HISTOGRAM_INIT__ = true;
 
-    const CACHE_KEY = "__OI_LAST_VALID_DATA__";
-    window.__OI_CACHE__ = null;
-
     /* ============================================================
-       WAIT FOR TABLE
+       WAIT FOR TABLE TO LOAD
     ============================================================ */
-    function waitForTable(cb) {
-        const t = setInterval(() => {
+    function waitForTable(callback) {
+        const check = setInterval(() => {
             if (document.querySelector("table tbody tr td")) {
-                clearInterval(t);
-                cb();
+                clearInterval(check);
+                callback();
             }
         }, 400);
     }
 
     /* ============================================================
-       DRAG SUPPORT
+       DRAGGABLE PANEL SUPPORT
     ============================================================ */
     function makePanelDraggable(panel, header) {
-        let d = false, x = 0, y = 0;
+        let isDown = false;
+        let offsetX = 0;
+        let offsetY = 0;
 
         header.addEventListener("mousedown", e => {
-            d = true;
-            x = e.clientX - panel.offsetLeft;
-            y = e.clientY - panel.offsetTop;
+            isDown = true;
+            offsetX = e.clientX - panel.offsetLeft;
+            offsetY = e.clientY - panel.offsetTop;
             document.body.style.userSelect = "none";
         });
 
         document.addEventListener("mousemove", e => {
-            if (!d) return;
-            panel.style.left = e.clientX - x + "px";
-            panel.style.top = e.clientY - y + "px";
+            if (!isDown) return;
+            panel.style.left = (e.clientX - offsetX) + "px";
+            panel.style.top = (e.clientY - offsetY) + "px";
         });
 
         document.addEventListener("mouseup", () => {
-            d = false;
+            isDown = false;
+            document.body.style.userSelect = "auto";
+        });
+
+        header.addEventListener("touchstart", e => {
+            isDown = true;
+            const t = e.touches[0];
+            offsetX = t.clientX - panel.offsetLeft;
+            offsetY = t.clientY - panel.offsetTop;
+            document.body.style.userSelect = "none";
+        });
+
+        document.addEventListener("touchmove", e => {
+            if (!isDown) return;
+            const t = e.touches[0];
+            panel.style.left = (t.clientX - offsetX) + "px";
+            panel.style.top = (t.clientY - offsetY) + "px";
+        });
+
+        document.addEventListener("touchend", () => {
+            isDown = false;
             document.body.style.userSelect = "auto";
         });
     }
 
     /* ============================================================
-       PANEL
+       CREATE PANEL
     ============================================================ */
     function createPanel() {
-        const p = document.createElement("div");
-        p.id = "oiHistogramPanel";
-        p.style.cssText = `
-            position:fixed;top:70px;left:10px;width:92%;
-            max-width:420px;background:#fff;border-radius:16px;
-            box-shadow:0 4px 20px rgba(0,0,0,.3);
-            z-index:9999999;font-family:sans-serif;
+        const panel = document.createElement("div");
+        panel.id = "oiHistogramPanel";
+        panel.style.cssText = `
+            position: fixed;
+            top: 70px;
+            left: 10px;
+            width: 92%;
+            max-width: 420px;
+            background: #fff;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            z-index: 9999999;
+            padding: 0;
+            font-family: sans-serif;
+            overflow: hidden;
         `;
 
-        p.innerHTML = `
+        panel.innerHTML = `
             <div id="oiHeader"
-                style="padding:8px 12px;background:#0a73eb;
-                color:#fff;font-weight:700;cursor:grab;
-                display:flex;justify-content:space-between">
+                style="display:flex;justify-content:space-between;align-items:center;
+                font-size:20px;font-weight:700;padding:8px 12px;
+                background:#0a73eb;color:white;border-radius:12px;cursor:grab;">
                 <span>OI Histogram</span>
-                <span id="closeOI" style="cursor:pointer">✖</span>
+                <div style="display:flex;gap:12px;">
+                    <span id="toggleMin" style="cursor:pointer;">—</span>
+                    <span id="closeOI" style="cursor:pointer;">✖</span>
+                </div>
             </div>
-            <div id="oiContainer" style="padding:10px;height:70vh;overflow:auto">
-                Loading…
+
+            <div id="oiContainer"
+                style="margin-top:10px;height:70vh;overflow:auto;
+                border:1px solid #ddd;border-radius:10px;padding:10px;">
             </div>
         `;
 
-        document.body.appendChild(p);
-        makePanelDraggable(p, p.querySelector("#oiHeader"));
-        p.querySelector("#closeOI").onclick = () => p.remove();
+        document.body.appendChild(panel);
+
+        const container = document.getElementById("oiContainer");
+        const header = document.getElementById("oiHeader");
+
+        makePanelDraggable(panel, header);
+
+        // 🔥 preload cached data instantly
+        const cached = loadCache();
+        if (cached.length) renderHTMLBars(cached);
     }
 
-    createPanel();
+    /* ============================================================
+       LOCAL STORAGE CACHE
+    ============================================================ */
+    const OI_CACHE_KEY = "__OI_HISTOGRAM_CACHE__";
+
+    function saveCache(data) {
+        try {
+            localStorage.setItem(OI_CACHE_KEY, JSON.stringify(data));
+        } catch (e) {}
+    }
+
+    function loadCache() {
+        try {
+            return JSON.parse(localStorage.getItem(OI_CACHE_KEY)) || [];
+        } catch (e) {
+            return [];
+        }
+    }
 
     /* ============================================================
        UTIL
     ============================================================ */
-    const num = v => parseInt(v.replace(/,/g, "")) || 0;
-    const bar = (v, m) => m ? Math.max(8, v / m * 250) : 8;
+    function parseNumber(v) {
+        return parseInt(v.replace(/,/g, "")) || 0;
+    }
 
-    /* ============================================================
-       READ TABLE
-    ============================================================ */
-    function readTable() {
-        const rows = [...document.querySelectorAll("table tbody tr")];
-        const out = [];
-
-        rows.forEach(r => {
-            const c = r.children;
-            if (c.length < 22) return;
-            out.push({
-                ceOI: num(c[1].innerText),
-                ceChg: num(c[2].innerText),
-                strike: num(c[11].innerText),
-                peChg: num(c[20].innerText),
-                peOI: num(c[21].innerText)
-            });
-        });
-
-        return out.filter(x => x.strike);
+    function barWidth(value, max) {
+        if (!max) return 8;
+        return Math.max(8, (value / max) * 250);
     }
 
     /* ============================================================
-       RENDER (CACHE SAFE)
+       READ OPTION CHAIN
     ============================================================ */
-    function render(data) {
+    function getOptionData() {
+        const rows = [...document.querySelectorAll("table tbody tr")];
+        const data = [];
+
+        rows.forEach(r => {
+            const c = r.querySelectorAll("td");
+            if (c.length < 22) return;
+
+            data.push({
+                ceOI: parseNumber(c[1].innerText),
+                ceChg: parseNumber(c[2].innerText),
+                strike: parseNumber(c[11].innerText),
+                peChg: parseNumber(c[20].innerText),
+                peOI: parseNumber(c[21].innerText)
+            });
+        });
+
+        return data.filter(x => x.strike > 0);
+    }
+
+    /* ============================================================
+       RENDER HISTOGRAM
+    ============================================================ */
+    function renderHTMLBars(dataOverride) {
         const box = document.getElementById("oiContainer");
-        if (!data || !data.length) return;
+        const data = dataOverride || getOptionData();
+
+        if (!data.length) {
+            const cached = loadCache();
+            if (cached.length) renderHTMLBars(cached);
+            return;
+        }
+
+        saveCache(data);
 
         data.sort((a, b) => b.strike - a.strike);
 
-        const max = Math.max(
+        const maxVal = Math.max(
             ...data.map(x => x.ceOI),
             ...data.map(x => x.peOI),
             ...data.map(x => x.ceChg),
             ...data.map(x => x.peChg)
         );
 
-        box.innerHTML = data.map(r => `
-            <div style="border-bottom:1px dashed #ddd;margin-bottom:12px">
-                <div style="font-weight:700">${r.strike}</div>
-                <div><div style="width:${bar(r.ceOI,max)}px;height:10px;background:#ff3030"></div>${r.ceOI}</div>
-                <div><div style="width:${bar(r.peOI,max)}px;height:10px;background:#16c784"></div>${r.peOI}</div>
-                <div><div style="width:${bar(r.ceChg,max)}px;height:10px;background:#ffb300"></div>${r.ceChg}</div>
-                <div><div style="width:${bar(r.peChg,max)}px;height:10px;background:#0066ff"></div>${r.peChg}</div>
-            </div>
-        `).join("");
+        let html = "";
+
+        data.forEach(row => {
+            html += `
+            <div style="margin-bottom:20px;border-bottom:1px dashed #ddd;padding-bottom:10px;">
+                <div style="font-size:20px;font-weight:700;margin-bottom:10px;">
+                    ${row.strike.toLocaleString()}
+                </div>
+
+                <div style="display:flex;align-items:center;margin:4px 0;">
+                    <div style="width:${barWidth(row.ceOI,maxVal)}px;height:12px;background:#ff3030;border-radius:6px;"></div>
+                    <span style="margin-left:6px;">${row.ceOI.toLocaleString()}</span>
+                </div>
+
+                <div style="display:flex;align-items:center;margin:4px 0;">
+                    <div style="width:${barWidth(row.peOI,maxVal)}px;height:12px;background:#16c784;border-radius:6px;"></div>
+                    <span style="margin-left:6px;">${row.peOI.toLocaleString()}</span>
+                </div>
+
+                <div style="display:flex;align-items:center;margin:4px 0;">
+                    <div style="width:${barWidth(row.ceChg,maxVal)}px;height:12px;background:#ffb300;border-radius:6px;"></div>
+                    <span style="margin-left:6px;">${row.ceChg.toLocaleString()}</span>
+                </div>
+
+                <div style="display:flex;align-items:center;margin:4px 0;">
+                    <div style="width:${barWidth(row.peChg,maxVal)}px;height:12px;background:#0066ff;border-radius:6px;"></div>
+                    <span style="margin-left:6px;">${row.peChg.toLocaleString()}</span>
+                </div>
+            </div>`;
+        });
+
+        box.innerHTML = html;
     }
 
     /* ============================================================
-       MAIN UPDATE LOGIC (ANTI-LOADING FREEZE)
+       AUTO SYNC
     ============================================================ */
-    function update() {
-        const live = readTable();
+    function enableInstantSync() {
+        const table = document.querySelector("table tbody");
+        if (!table) return;
 
-        if (live.length) {
-            window.__OI_CACHE__ = live;
-            localStorage.setItem(CACHE_KEY, JSON.stringify(live));
-            render(live);
-            return;
-        }
+        let last = table.innerText;
 
-        if (window.__OI_CACHE__) {
-            render(window.__OI_CACHE__);
-            return;
-        }
-
-        const saved = localStorage.getItem(CACHE_KEY);
-        if (saved) render(JSON.parse(saved));
-    }
-
-    /* ============================================================
-       OBSERVER
-    ============================================================ */
-    function bindObserver() {
-        const tb = document.querySelector("table tbody");
-        if (!tb) return;
-
-        let last = tb.innerText;
-        new MutationObserver(() => {
-            if (tb.innerText !== last) {
-                last = tb.innerText;
-                update();
+        const observer = new MutationObserver(() => {
+            const now = table.innerText;
+            if (now !== last) {
+                last = now;
+                renderHTMLBars();
             }
-        }).observe(tb, { childList: true, subtree: true });
+        });
+
+        observer.observe(table, { childList: true, subtree: true });
     }
 
     /* ============================================================
-       NSE REFRESH FIX
+       NSE REFRESH BUTTON FIX
     ============================================================ */
-    (function () {
-        const orig = window.refreshOCPage;
-        if (typeof orig !== "function") return;
+    function bindNSERefresh() {
+        document.addEventListener("click", e => {
+            const a = e.target.closest("a[onclick*='refreshOCPage']");
+            if (!a) return;
 
-        window.refreshOCPage = function () {
-            update(); // keep cached view
-            orig.apply(this, arguments);
-            waitForTable(() => setTimeout(update, 300));
-        };
-    })();
+            const cached = loadCache();
+            if (cached.length) renderHTMLBars(cached);
+
+            setTimeout(() => {
+                waitForTable(() => {
+                    renderHTMLBars();
+                    enableInstantSync();
+                });
+            }, 1200);
+        }, true);
+    }
 
     /* ============================================================
-       BOOT
+       TABLE REPLACEMENT MONITOR
     ============================================================ */
+    function monitorTableReplacement() {
+        const observer = new MutationObserver(() => {
+            const table = document.querySelector("table tbody");
+            if (table) {
+                renderHTMLBars();
+                enableInstantSync();
+            }
+        });
+
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    /* ============================================================
+       INIT
+    ============================================================ */
+    createPanel();
+    bindNSERefresh();
+    monitorTableReplacement();
+
     waitForTable(() => {
-        const saved = localStorage.getItem(CACHE_KEY);
-        if (saved) render(JSON.parse(saved));
-        update();
-        bindObserver();
+        renderHTMLBars();
+        enableInstantSync();
     });
 
 })();
- 
