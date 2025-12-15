@@ -1,3 +1,4 @@
+
 (function () {
     "use strict";
 
@@ -6,6 +7,7 @@
 
     let RENDER_LOCK = false;
     let TABLE_OBSERVER = null;
+    let LAST_REFRESH = null;
 
     /* ============================================================
        WAIT FOR TABLE
@@ -43,26 +45,10 @@
             down = false;
             document.body.style.userSelect = "auto";
         });
-
-        header.addEventListener("touchstart", e => {
-            const t = e.touches[0];
-            down = true;
-            ox = t.clientX - panel.offsetLeft;
-            oy = t.clientY - panel.offsetTop;
-        });
-
-        document.addEventListener("touchmove", e => {
-            if (!down) return;
-            const t = e.touches[0];
-            panel.style.left = (t.clientX - ox) + "px";
-            panel.style.top = (t.clientY - oy) + "px";
-        });
-
-        document.addEventListener("touchend", () => down = false);
     }
 
     /* ============================================================
-       PANEL (UNCHANGED UI)
+       PANEL (HEADER UPDATED)
     ============================================================ */
     function createPanel() {
         const panel = document.createElement("div");
@@ -77,13 +63,21 @@
 
         panel.innerHTML = `
             <div id="oiHeader"
-                style="display:flex;justify-content:space-between;align-items:center;
-                font-size:20px;font-weight:700;padding:8px 12px;
-                background:#0a73eb;color:white;border-radius:12px;cursor:grab;">
-                <span>OI Histogram</span>
-                <div style="display:flex;gap:12px;">
-                    <span id="oiMin" style="cursor:pointer;">—</span>
-                    <span id="oiClose" style="cursor:pointer;">✖</span>
+                style="padding:8px 12px;background:#0a73eb;color:white;
+                border-radius:12px;cursor:grab;">
+                
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <span style="font-size:20px;font-weight:700;">OI Histogram</span>
+                    <div>
+                        <span id="oiMin" style="cursor:pointer;margin-right:10px;">—</span>
+                        <span id="oiClose" style="cursor:pointer;">✖</span>
+                    </div>
+                </div>
+
+                <div style="font-size:12px;margin-top:4px;">
+                    <span id="oiPCR">PCR: --</span> |
+                    <span id="oiTotals">CE: -- | PE: --</span><br>
+                    <span id="oiRefresh">Last Sync: --</span>
                 </div>
             </div>
 
@@ -134,7 +128,7 @@
     const bw = (v, m) => Math.max(8, (v / m) * 250);
 
     /* ============================================================
-       READ TABLE
+       READ TABLE + ATM
     ============================================================ */
     function getData() {
         const rows = [...document.querySelectorAll("table tbody tr")];
@@ -156,7 +150,25 @@
     }
 
     /* ============================================================
-       DRAW
+       HEADER METRICS
+    ============================================================ */
+    function updateHeader(data) {
+        const ceLast2 = data.slice(-2).reduce((s, x) => s + x.ceOI, 0);
+        const peLast22 = data.slice(-22).reduce((s, x) => s + x.peOI, 0);
+
+        const pcr = ceLast2 ? (peLast22 / ceLast2).toFixed(2) : "--";
+
+        document.getElementById("oiPCR").innerText = `PCR: ${pcr}`;
+        document.getElementById("oiTotals").innerText =
+            `CE: ${ceLast2.toLocaleString()} | PE: ${peLast22.toLocaleString()}`;
+
+        LAST_REFRESH = new Date();
+        document.getElementById("oiRefresh").innerText =
+            `Last Sync: ${LAST_REFRESH.toLocaleTimeString()}`;
+    }
+
+    /* ============================================================
+       DRAW + ATM CENTER
     ============================================================ */
     function drawBars(data) {
         const box = document.getElementById("oiContainer");
@@ -164,6 +176,8 @@
 
         saveCache(data);
         data.sort((a, b) => b.strike - a.strike);
+
+        updateHeader(data);
 
         const max = Math.max(
             ...data.map(x => x.ceOI),
@@ -173,7 +187,8 @@
         );
 
         box.innerHTML = data.map(r => `
-            <div style="margin-bottom:20px;border-bottom:1px dashed #ddd;padding-bottom:10px;">
+            <div class="oiRow" data-strike="${r.strike}"
+                 style="margin-bottom:20px;border-bottom:1px dashed #ddd;padding-bottom:10px;">
                 <div style="font-size:20px;font-weight:700;margin-bottom:6px;">
                     ${r.strike}
                 </div>
@@ -184,6 +199,28 @@
                 <div><div style="width:${bw(r.peChg,max)}px;height:12px;background:#0066ff"></div>${r.peChg}</div>
             </div>
         `).join("");
+
+        centerATM(data);
+    }
+
+    /* ============================================================
+       ATM CENTERING
+    ============================================================ */
+    function centerATM(data) {
+        const spotEl = [...document.querySelectorAll("strong, span, b")]
+            .find(e => e.innerText.includes("Underlying"));
+
+        if (!spotEl) return;
+
+        const spot = num(spotEl.innerText);
+        let atm = data.reduce((a, b) =>
+            Math.abs(b.strike - spot) < Math.abs(a.strike - spot) ? b : a
+        );
+
+        const atmRow = document.querySelector(`.oiRow[data-strike="${atm.strike}"]`);
+        if (atmRow) {
+            atmRow.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
     }
 
     /* ============================================================
@@ -196,11 +233,11 @@
 
         RENDER_LOCK = true;
         drawBars(d);
-        setTimeout(() => RENDER_LOCK = false, 300);
+        setTimeout(() => RENDER_LOCK = false, 400);
     }
 
     /* ============================================================
-       AUTO SYNC (FIXED)
+       AUTO SYNC (ROBUST)
     ============================================================ */
     function bindTableObserver(tbody) {
         if (TABLE_OBSERVER) TABLE_OBSERVER.disconnect();
@@ -223,7 +260,7 @@
     }
 
     /* ============================================================
-       NSE REFRESH FIX
+       NSE REFRESH BUTTON
     ============================================================ */
     document.addEventListener("click", e => {
         const a = e.target.closest("a[onclick*='refreshOCPage']");
@@ -241,11 +278,11 @@
     }, true);
 
     /* ============================================================
-       DETECT TABLE REPLACEMENT
+       TABLE REPLACEMENT WATCH
     ============================================================ */
     const bodyObs = new MutationObserver(() => {
         const tbody = document.querySelector("table tbody");
-        if (tbody && (!TABLE_OBSERVER || TABLE_OBSERVER.__target !== tbody)) {
+        if (tbody && (!TABLE_OBSERVER || TABLE_OBSERVER.__t !== tbody)) {
             bindTableObserver(tbody);
             safeRender();
         }
@@ -262,4 +299,3 @@
     });
 
 })();
-
