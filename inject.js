@@ -1,3 +1,4 @@
+
 (function () {
     "use strict";
 
@@ -5,12 +6,11 @@
     window.__OI_HISTOGRAM_INIT__ = true;
 
     /* ============================================================
-       WAIT FOR NSE TABLE
+       WAIT FOR NSE OPTION CHAIN TABLE
     ============================================================ */
     function waitForTable(cb) {
         const t = setInterval(() => {
-            const rows = document.querySelectorAll("table tbody tr td");
-            if (rows.length > 0) {
+            if (document.querySelector("table tbody")) {
                 clearInterval(t);
                 cb();
             }
@@ -23,39 +23,37 @@
     function makeDraggable(panel, header) {
         let down = false, ox = 0, oy = 0;
 
-        header.addEventListener("mousedown", e => {
+        const start = (x, y) => {
             down = true;
-            ox = e.clientX - panel.offsetLeft;
-            oy = e.clientY - panel.offsetTop;
-        });
+            ox = x - panel.offsetLeft;
+            oy = y - panel.offsetTop;
+        };
 
-        document.addEventListener("mousemove", e => {
+        const move = (x, y) => {
             if (!down) return;
-            panel.style.left = (e.clientX - ox) + "px";
-            panel.style.top = (e.clientY - oy) + "px";
-        });
+            panel.style.left = (x - ox) + "px";
+            panel.style.top = (y - oy) + "px";
+        };
 
-        document.addEventListener("mouseup", () => down = false);
+        const end = () => down = false;
+
+        header.addEventListener("mousedown", e => start(e.clientX, e.clientY));
+        document.addEventListener("mousemove", e => move(e.clientX, e.clientY));
+        document.addEventListener("mouseup", end);
 
         header.addEventListener("touchstart", e => {
             const t = e.touches[0];
-            down = true;
-            ox = t.clientX - panel.offsetLeft;
-            oy = t.clientY - panel.offsetTop;
+            start(t.clientX, t.clientY);
         });
-
         document.addEventListener("touchmove", e => {
-            if (!down) return;
             const t = e.touches[0];
-            panel.style.left = (t.clientX - ox) + "px";
-            panel.style.top = (t.clientY - oy) + "px";
+            if (t) move(t.clientX, t.clientY);
         });
-
-        document.addEventListener("touchend", () => down = false);
+        document.addEventListener("touchend", end);
     }
 
     /* ============================================================
-       CREATE PANEL
+       CREATE FLOATING PANEL
     ============================================================ */
     function createPanel() {
         const p = document.createElement("div");
@@ -78,6 +76,7 @@
                 <span>OI Histogram</span>
                 <span id="oiClose" style="cursor:pointer">✖</span>
             </div>
+
             <div id="oiContainer" style="
                 height:70vh;overflow:auto;
                 padding:10px">
@@ -93,13 +92,13 @@
     createPanel();
 
     /* ============================================================
-       UTILITIES
+       UTILS
     ============================================================ */
-    const num = v => parseInt((v || "").replace(/,/g, "")) || 0;
+    const num = v => parseInt((v || "").replace(/,/g, ""), 10) || 0;
     const barW = (v, m) => m ? Math.max(8, (v / m) * 240) : 0;
 
     /* ============================================================
-       READ OPTION CHAIN (CORRECT MAP)
+       READ OPTION CHAIN DATA (CORRECT NSE MAP)
     ============================================================ */
     function getOptionData() {
         const rows = document.querySelectorAll("table tbody tr");
@@ -125,26 +124,35 @@
     }
 
     /* ============================================================
-       SAFE RENDER (RETRY LOGIC)
+       SAFE RENDER (HARD NSE FIX)
     ============================================================ */
     function renderHTMLBars(retry = 0) {
         const box = document.getElementById("oiContainer");
-        const rows = document.querySelectorAll("table tbody tr");
+        const rows = [...document.querySelectorAll("table tbody tr")];
 
-        if (rows.length < 5) {
-            if (retry < 12) {
-                box.innerHTML = "Loading option chain…";
-                setTimeout(() => renderHTMLBars(retry + 1), 400);
+        // 🔒 HARD CONDITION: valid strike prices must exist
+        const validStrikeRows = rows.filter(r => {
+            const c = r.querySelectorAll("td");
+            if (c.length < 12) return false;
+            const strike = num(c[11].innerText);
+            return strike > 0;
+        });
+
+        if (validStrikeRows.length < 3) {
+            if (retry < 15) {
+                box.innerHTML = "Loading NSE data…";
+                setTimeout(() => renderHTMLBars(retry + 1), 500);
+            } else {
+                box.innerHTML = "NSE data delayed. Click refresh ⟳";
             }
             return;
         }
 
         const data = getOptionData();
-
         if (!data.length) {
-            if (retry < 12) {
-                box.innerHTML = "Syncing data…";
-                setTimeout(() => renderHTMLBars(retry + 1), 400);
+            if (retry < 15) {
+                box.innerHTML = "Syncing option chain…";
+                setTimeout(() => renderHTMLBars(retry + 1), 500);
             }
             return;
         }
@@ -159,6 +167,7 @@
             <div style="margin-bottom:14px;
                         border-bottom:1px dashed #ddd;
                         padding-bottom:6px">
+
                 <div style="font-weight:700;font-size:18px">
                     ${d.strike}
                 </div>
@@ -191,7 +200,7 @@
     }
 
     /* ============================================================
-       AUTO SYNC WHEN TABLE CHANGES (DEBOUNCED)
+       TABLE MUTATION OBSERVER (DEBOUNCED)
     ============================================================ */
     function bindTableObserver() {
         const tbody = document.querySelector("table tbody");
@@ -202,12 +211,12 @@
 
         new MutationObserver(() => {
             clearTimeout(timer);
-            timer = setTimeout(() => renderHTMLBars(0), 300);
+            timer = setTimeout(() => renderHTMLBars(0), 500);
         }).observe(tbody, { childList: true, subtree: true });
     }
 
     /* ============================================================
-       NSE REFRESH BUTTON FIX (ANCHOR)
+       NSE REFRESH BUTTON FIX (ANCHOR BASED)
     ============================================================ */
     function bindNSERefreshButton() {
         const a = document.querySelector("a[onclick*='refreshOCPage']");
@@ -215,7 +224,7 @@
 
         a.__OI_BOUND__ = true;
         a.addEventListener("click", () => {
-            setTimeout(() => renderHTMLBars(0), 800);
+            setTimeout(() => renderHTMLBars(0), 1200);
         });
     }
 
@@ -240,4 +249,3 @@
     });
 
 })();
-
