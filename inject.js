@@ -1,193 +1,120 @@
-
 (function () {
     "use strict";
 
     if (window.__OI_HISTOGRAM_INIT__) return;
     window.__OI_HISTOGRAM_INIT__ = true;
 
+    const CACHE_KEY = "__OI_LAST_VALID_DATA__";
+    window.__OI_CACHE__ = null;
+
     /* ============================================================
-       WAIT FOR TABLE TO LOAD
+       WAIT FOR TABLE
     ============================================================ */
-    function waitForTable(callback) {
-        const check = setInterval(() => {
+    function waitForTable(cb) {
+        const t = setInterval(() => {
             if (document.querySelector("table tbody tr td")) {
-                clearInterval(check);
-                callback();
+                clearInterval(t);
+                cb();
             }
         }, 400);
     }
 
     /* ============================================================
-       DRAGGABLE PANEL SUPPORT
+       DRAG SUPPORT
     ============================================================ */
     function makePanelDraggable(panel, header) {
-        let isDown = false;
-        let offsetX = 0;
-        let offsetY = 0;
+        let d = false, x = 0, y = 0;
 
         header.addEventListener("mousedown", e => {
-            isDown = true;
-            offsetX = e.clientX - panel.offsetLeft;
-            offsetY = e.clientY - panel.offsetTop;
+            d = true;
+            x = e.clientX - panel.offsetLeft;
+            y = e.clientY - panel.offsetTop;
             document.body.style.userSelect = "none";
         });
 
         document.addEventListener("mousemove", e => {
-            if (!isDown) return;
-            panel.style.left = (e.clientX - offsetX) + "px";
-            panel.style.top = (e.clientY - offsetY) + "px";
+            if (!d) return;
+            panel.style.left = e.clientX - x + "px";
+            panel.style.top = e.clientY - y + "px";
         });
 
         document.addEventListener("mouseup", () => {
-            isDown = false;
-            document.body.style.userSelect = "auto";
-        });
-
-        header.addEventListener("touchstart", e => {
-            isDown = true;
-            const t = e.touches[0];
-            offsetX = t.clientX - panel.offsetLeft;
-            offsetY = t.clientY - panel.offsetTop;
-            document.body.style.userSelect = "none";
-        });
-
-        document.addEventListener("touchmove", e => {
-            if (!isDown) return;
-            const t = e.touches[0];
-            panel.style.left = (t.clientX - offsetX) + "px";
-            panel.style.top = (t.clientY - offsetY) + "px";
-        });
-
-        document.addEventListener("touchend", () => {
-            isDown = false;
+            d = false;
             document.body.style.userSelect = "auto";
         });
     }
 
     /* ============================================================
-       CREATE PANEL
+       PANEL
     ============================================================ */
     function createPanel() {
-        const panel = document.createElement("div");
-        panel.id = "oiHistogramPanel";
-        panel.style.cssText = `
-            position: fixed;
-            top: 70px;
-            left: 10px;
-            width: 92%;
-            max-width: 420px;
-            background: #fff;
-            border-radius: 16px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-            z-index: 9999999;
-            overflow: hidden;
-            font-family: sans-serif;
+        const p = document.createElement("div");
+        p.id = "oiHistogramPanel";
+        p.style.cssText = `
+            position:fixed;top:70px;left:10px;width:92%;
+            max-width:420px;background:#fff;border-radius:16px;
+            box-shadow:0 4px 20px rgba(0,0,0,.3);
+            z-index:9999999;font-family:sans-serif;
         `;
 
-        panel.innerHTML = `
+        p.innerHTML = `
             <div id="oiHeader"
-                style="display:flex;justify-content:space-between;align-items:center;
-                padding:8px 12px;background:#0a73eb;color:#fff;
-                font-size:18px;font-weight:700;cursor:grab;">
+                style="padding:8px 12px;background:#0a73eb;
+                color:#fff;font-weight:700;cursor:grab;
+                display:flex;justify-content:space-between">
                 <span>OI Histogram</span>
-                <span id="closeOI" style="cursor:pointer;">✖</span>
+                <span id="closeOI" style="cursor:pointer">✖</span>
             </div>
-            <div id="oiContainer"
-                style="padding:10px;height:70vh;overflow:auto;">
+            <div id="oiContainer" style="padding:10px;height:70vh;overflow:auto">
                 Loading…
             </div>
         `;
 
-        document.body.appendChild(panel);
-        makePanelDraggable(panel, document.getElementById("oiHeader"));
-        document.getElementById("closeOI").onclick = () => panel.remove();
+        document.body.appendChild(p);
+        makePanelDraggable(p, p.querySelector("#oiHeader"));
+        p.querySelector("#closeOI").onclick = () => p.remove();
     }
 
     createPanel();
 
     /* ============================================================
-       ADD SYNC BUTTON
-    ============================================================ */
-    function addSyncButton() {
-        const nodes = [...document.querySelectorAll("*")];
-        let target = null;
-
-        for (let el of nodes) {
-            if (el.innerText && el.innerText.includes("Underlying Index")) {
-                target = el.parentElement;
-                break;
-            }
-        }
-
-        if (!target || document.getElementById("oiSyncBtn")) return;
-
-        const btn = document.createElement("button");
-        btn.id = "oiSyncBtn";
-        btn.innerText = "🔄 Sync";
-        btn.style.cssText = `
-            margin-left:10px;
-            padding:4px 10px;
-            border-radius:8px;
-            border:1px solid #0a73eb;
-            background:#fff;
-            color:#0a73eb;
-            cursor:pointer;
-        `;
-        btn.onclick = () => renderHTMLBars();
-        target.appendChild(btn);
-    }
-
-    setTimeout(addSyncButton, 1200);
-
-    /* ============================================================
        UTIL
     ============================================================ */
-    function parseNumber(v) {
-        return parseInt(v.replace(/,/g, "")) || 0;
-    }
+    const num = v => parseInt(v.replace(/,/g, "")) || 0;
+    const bar = (v, m) => m ? Math.max(8, v / m * 250) : 8;
 
     /* ============================================================
        READ TABLE
     ============================================================ */
-    function getOptionData() {
+    function readTable() {
         const rows = [...document.querySelectorAll("table tbody tr")];
-        const data = [];
+        const out = [];
 
         rows.forEach(r => {
-            const c = r.querySelectorAll("td");
+            const c = r.children;
             if (c.length < 22) return;
-
-            data.push({
-                ceOI: parseNumber(c[1].innerText),
-                ceChg: parseNumber(c[2].innerText),
-                strike: parseNumber(c[11].innerText),
-                peChg: parseNumber(c[20].innerText),
-                peOI: parseNumber(c[21].innerText)
+            out.push({
+                ceOI: num(c[1].innerText),
+                ceChg: num(c[2].innerText),
+                strike: num(c[11].innerText),
+                peChg: num(c[20].innerText),
+                peOI: num(c[21].innerText)
             });
         });
 
-        return data.filter(x => x.strike);
-    }
-
-    function barWidth(v, max) {
-        return max ? Math.max(8, (v / max) * 250) : 0;
+        return out.filter(x => x.strike);
     }
 
     /* ============================================================
-       RENDER HISTOGRAM
+       RENDER (CACHE SAFE)
     ============================================================ */
-    function renderHTMLBars() {
+    function render(data) {
         const box = document.getElementById("oiContainer");
-        const data = getOptionData();
-
-        if (!data.length) {
-            box.innerHTML = "Waiting for NSE data…";
-            return;
-        }
+        if (!data || !data.length) return;
 
         data.sort((a, b) => b.strike - a.strike);
 
-        const maxVal = Math.max(
+        const max = Math.max(
             ...data.map(x => x.ceOI),
             ...data.map(x => x.peOI),
             ...data.map(x => x.ceChg),
@@ -195,81 +122,77 @@
         );
 
         box.innerHTML = data.map(r => `
-            <div style="margin-bottom:14px;border-bottom:1px dashed #ddd;">
-                <div style="font-weight:700;margin-bottom:6px;">${r.strike}</div>
-                <div><div style="width:${barWidth(r.ceOI,maxVal)}px;height:10px;background:#ff3030"></div>${r.ceOI}</div>
-                <div><div style="width:${barWidth(r.peOI,maxVal)}px;height:10px;background:#16c784"></div>${r.peOI}</div>
-                <div><div style="width:${barWidth(r.ceChg,maxVal)}px;height:10px;background:#ffb300"></div>${r.ceChg}</div>
-                <div><div style="width:${barWidth(r.peChg,maxVal)}px;height:10px;background:#0066ff"></div>${r.peChg}</div>
+            <div style="border-bottom:1px dashed #ddd;margin-bottom:12px">
+                <div style="font-weight:700">${r.strike}</div>
+                <div><div style="width:${bar(r.ceOI,max)}px;height:10px;background:#ff3030"></div>${r.ceOI}</div>
+                <div><div style="width:${bar(r.peOI,max)}px;height:10px;background:#16c784"></div>${r.peOI}</div>
+                <div><div style="width:${bar(r.ceChg,max)}px;height:10px;background:#ffb300"></div>${r.ceChg}</div>
+                <div><div style="width:${bar(r.peChg,max)}px;height:10px;background:#0066ff"></div>${r.peChg}</div>
             </div>
         `).join("");
     }
 
     /* ============================================================
-       AUTO UPDATE
+       MAIN UPDATE LOGIC (ANTI-LOADING FREEZE)
     ============================================================ */
-    function enableInstantSync() {
-        const table = document.querySelector("table tbody");
-        if (!table) return;
+    function update() {
+        const live = readTable();
 
-        let last = table.innerText;
-        const observer = new MutationObserver(() => {
-            if (table.innerText !== last) {
-                last = table.innerText;
-                renderHTMLBars();
-            }
-        });
+        if (live.length) {
+            window.__OI_CACHE__ = live;
+            localStorage.setItem(CACHE_KEY, JSON.stringify(live));
+            render(live);
+            return;
+        }
 
-        observer.observe(table, { childList: true, subtree: true });
+        if (window.__OI_CACHE__) {
+            render(window.__OI_CACHE__);
+            return;
+        }
+
+        const saved = localStorage.getItem(CACHE_KEY);
+        if (saved) render(JSON.parse(saved));
     }
 
     /* ============================================================
-       FIX: NSE REFRESH BUTTON HOOK
+       OBSERVER
     ============================================================ */
-    (function hookNSERefresh() {
-        if (window.__OI_REFRESH_HOOK__) return;
-        window.__OI_REFRESH_HOOK__ = true;
+    function bindObserver() {
+        const tb = document.querySelector("table tbody");
+        if (!tb) return;
 
-        const original = window.refreshOCPage;
-        if (typeof original === "function") {
-            window.refreshOCPage = function () {
-                const box = document.getElementById("oiContainer");
-                if (box) box.innerHTML = "Refreshing NSE data…";
+        let last = tb.innerText;
+        new MutationObserver(() => {
+            if (tb.innerText !== last) {
+                last = tb.innerText;
+                update();
+            }
+        }).observe(tb, { childList: true, subtree: true });
+    }
 
-                original.apply(this, arguments);
+    /* ============================================================
+       NSE REFRESH FIX
+    ============================================================ */
+    (function () {
+        const orig = window.refreshOCPage;
+        if (typeof orig !== "function") return;
 
-                waitForTable(() => {
-                    setTimeout(() => {
-                        renderHTMLBars();
-                        enableInstantSync();
-                        addSyncButton();
-                    }, 300);
-                });
-            };
-        }
+        window.refreshOCPage = function () {
+            update(); // keep cached view
+            orig.apply(this, arguments);
+            waitForTable(() => setTimeout(update, 300));
+        };
     })();
 
     /* ============================================================
-       MONITOR TABLE REPLACEMENT
-    ============================================================ */
-    function monitorTableReplacement() {
-        const obs = new MutationObserver(() => {
-            if (document.querySelector("table tbody")) {
-                enableInstantSync();
-                renderHTMLBars();
-            }
-        });
-        obs.observe(document.body, { childList: true, subtree: true });
-    }
-
-    monitorTableReplacement();
-
-    /* ============================================================
-       INITIAL
+       BOOT
     ============================================================ */
     waitForTable(() => {
-        renderHTMLBars();
-        enableInstantSync();
+        const saved = localStorage.getItem(CACHE_KEY);
+        if (saved) render(JSON.parse(saved));
+        update();
+        bindObserver();
     });
 
 })();
+ 
