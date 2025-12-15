@@ -1,4 +1,3 @@
-
 (function () {
     "use strict";
 
@@ -6,15 +5,17 @@
     window.__OI_HISTOGRAM_INIT__ = true;
 
     let RENDER_LOCK = false;
+    let TABLE_OBSERVER = null;
 
     /* ============================================================
        WAIT FOR TABLE
     ============================================================ */
     function waitForTable(cb) {
         const t = setInterval(() => {
-            if (document.querySelector("table tbody tr td")) {
+            const tbody = document.querySelector("table tbody");
+            if (tbody && tbody.querySelector("tr td")) {
                 clearInterval(t);
-                cb();
+                cb(tbody);
             }
         }, 400);
     }
@@ -61,7 +62,7 @@
     }
 
     /* ============================================================
-       PANEL (RESTORED BUTTONS)
+       PANEL (UNCHANGED UI)
     ============================================================ */
     function createPanel() {
         const panel = document.createElement("div");
@@ -106,22 +107,15 @@
 
         minBtn.onclick = () => {
             minimized = !minimized;
-            if (minimized) {
-                container.style.display = "none";
-                panel.style.height = "48px";
-                minBtn.innerText = "+";
-            } else {
-                container.style.display = "block";
-                panel.style.height = fullHeight + "px";
-                minBtn.innerText = "—";
-            }
+            container.style.display = minimized ? "none" : "block";
+            panel.style.height = minimized ? "48px" : fullHeight + "px";
+            minBtn.innerText = minimized ? "+" : "—";
         };
 
         closeBtn.onclick = () => panel.remove();
 
         makeDraggable(panel, header);
 
-        // preload cached data
         const cached = loadCache();
         if (cached.length) drawBars(cached);
     }
@@ -130,13 +124,8 @@
        CACHE
     ============================================================ */
     const CACHE_KEY = "__OI_HISTOGRAM_CACHE__";
-    const saveCache = d => {
-        try { localStorage.setItem(CACHE_KEY, JSON.stringify(d)); } catch {}
-    };
-    const loadCache = () => {
-        try { return JSON.parse(localStorage.getItem(CACHE_KEY)) || []; }
-        catch { return []; }
-    };
+    const saveCache = d => { try { localStorage.setItem(CACHE_KEY, JSON.stringify(d)); } catch {} };
+    const loadCache = () => { try { return JSON.parse(localStorage.getItem(CACHE_KEY)) || []; } catch { return []; } };
 
     /* ============================================================
        UTIL
@@ -167,7 +156,7 @@
     }
 
     /* ============================================================
-       DRAW (SAFE)
+       DRAW
     ============================================================ */
     function drawBars(data) {
         const box = document.getElementById("oiContainer");
@@ -204,9 +193,33 @@
         if (RENDER_LOCK) return;
         const d = getData();
         if (!d.length) return;
+
         RENDER_LOCK = true;
         drawBars(d);
         setTimeout(() => RENDER_LOCK = false, 300);
+    }
+
+    /* ============================================================
+       AUTO SYNC (FIXED)
+    ============================================================ */
+    function bindTableObserver(tbody) {
+        if (TABLE_OBSERVER) TABLE_OBSERVER.disconnect();
+
+        let lastText = tbody.innerText;
+
+        TABLE_OBSERVER = new MutationObserver(() => {
+            const now = tbody.innerText;
+            if (now !== lastText) {
+                lastText = now;
+                safeRender();
+            }
+        });
+
+        TABLE_OBSERVER.observe(tbody, {
+            childList: true,
+            subtree: true,
+            characterData: true
+        });
     }
 
     /* ============================================================
@@ -219,21 +232,34 @@
         const cached = loadCache();
         if (cached.length) drawBars(cached);
 
-        setTimeout(() => waitForTable(safeRender), 1200);
+        setTimeout(() => {
+            waitForTable(tbody => {
+                bindTableObserver(tbody);
+                safeRender();
+            });
+        }, 1200);
     }, true);
 
     /* ============================================================
-       OBSERVE TABLE
+       DETECT TABLE REPLACEMENT
     ============================================================ */
-    const obs = new MutationObserver(() => {
-        if (document.querySelector("table tbody tr td")) safeRender();
+    const bodyObs = new MutationObserver(() => {
+        const tbody = document.querySelector("table tbody");
+        if (tbody && (!TABLE_OBSERVER || TABLE_OBSERVER.__target !== tbody)) {
+            bindTableObserver(tbody);
+            safeRender();
+        }
     });
-    obs.observe(document.body, { childList: true, subtree: true });
+    bodyObs.observe(document.body, { childList: true, subtree: true });
 
     /* ============================================================
        INIT
     ============================================================ */
     createPanel();
-    waitForTable(safeRender);
+    waitForTable(tbody => {
+        bindTableObserver(tbody);
+        safeRender();
+    });
 
 })();
+
