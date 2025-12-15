@@ -6,87 +6,41 @@
     window.__OI_HISTOGRAM_INIT__ = true;
 
     /* ============================================================
-       WAIT FOR NSE OPTION CHAIN TABLE
-    ============================================================ */
-    function waitForTable(cb) {
-        const t = setInterval(() => {
-            if (document.querySelector("table tbody")) {
-                clearInterval(t);
-                cb();
-            }
-        }, 400);
-    }
-
-    /* ============================================================
-       DRAGGABLE PANEL
-    ============================================================ */
-    function makeDraggable(panel, header) {
-        let down = false, ox = 0, oy = 0;
-
-        const start = (x, y) => {
-            down = true;
-            ox = x - panel.offsetLeft;
-            oy = y - panel.offsetTop;
-        };
-
-        const move = (x, y) => {
-            if (!down) return;
-            panel.style.left = (x - ox) + "px";
-            panel.style.top = (y - oy) + "px";
-        };
-
-        const end = () => down = false;
-
-        header.addEventListener("mousedown", e => start(e.clientX, e.clientY));
-        document.addEventListener("mousemove", e => move(e.clientX, e.clientY));
-        document.addEventListener("mouseup", end);
-
-        header.addEventListener("touchstart", e => {
-            const t = e.touches[0];
-            start(t.clientX, t.clientY);
-        });
-        document.addEventListener("touchmove", e => {
-            const t = e.touches[0];
-            if (t) move(t.clientX, t.clientY);
-        });
-        document.addEventListener("touchend", end);
-    }
-
-    /* ============================================================
        CREATE FLOATING PANEL
     ============================================================ */
     function createPanel() {
-        const p = document.createElement("div");
-        p.id = "oiHistogramPanel";
-        p.style.cssText = `
-            position:fixed;top:70px;left:10px;
-            width:92%;max-width:420px;
-            background:#fff;border-radius:16px;
-            box-shadow:0 4px 20px rgba(0,0,0,.3);
-            z-index:9999999;font-family:sans-serif;
+        const panel = document.createElement("div");
+        panel.id = "oiHistogramPanel";
+        panel.style.cssText = `
+            position:fixed;
+            top:70px;
+            left:10px;
+            width:92%;
+            max-width:420px;
+            background:#fff;
+            border-radius:16px;
+            box-shadow:0 4px 20px rgba(0,0,0,.35);
+            z-index:9999999;
+            font-family:sans-serif;
             overflow:hidden;
         `;
 
-        p.innerHTML = `
-            <div id="oiHeader" style="
-                background:#0a73eb;color:#fff;
-                padding:8px 12px;font-weight:700;
-                cursor:grab;display:flex;
-                justify-content:space-between">
-                <span>OI Histogram</span>
-                <span id="oiClose" style="cursor:pointer">✖</span>
+        panel.innerHTML = `
+            <div style="
+                background:#0a73eb;
+                color:#fff;
+                padding:8px 12px;
+                font-weight:700">
+                OI Histogram
             </div>
 
-            <div id="oiContainer" style="
-                height:70vh;overflow:auto;
-                padding:10px">
-                Loading NSE data…
+            <div id="oiContainer"
+                style="height:70vh;overflow:auto;padding:10px">
+                Click NSE refresh ⟳ to load data
             </div>
         `;
 
-        document.body.appendChild(p);
-        document.getElementById("oiClose").onclick = () => p.remove();
-        makeDraggable(p, document.getElementById("oiHeader"));
+        document.body.appendChild(panel);
     }
 
     createPanel();
@@ -98,14 +52,14 @@
     const barW = (v, m) => m ? Math.max(8, (v / m) * 240) : 0;
 
     /* ============================================================
-       READ OPTION CHAIN DATA (CORRECT NSE MAP)
+       READ NSE OPTION CHAIN (STRICT)
     ============================================================ */
     function getOptionData() {
         const rows = document.querySelectorAll("table tbody tr");
         const out = [];
 
-        rows.forEach(r => {
-            const c = r.querySelectorAll("td");
+        rows.forEach(row => {
+            const c = row.querySelectorAll("td");
             if (c.length < 22) return;
 
             const strike = num(c[11].innerText);
@@ -124,36 +78,14 @@
     }
 
     /* ============================================================
-       SAFE RENDER (HARD NSE FIX)
+       RENDER HISTOGRAM
     ============================================================ */
-    function renderHTMLBars(retry = 0) {
+    function renderHTMLBars() {
         const box = document.getElementById("oiContainer");
-        const rows = [...document.querySelectorAll("table tbody tr")];
-
-        // 🔒 HARD CONDITION: valid strike prices must exist
-        const validStrikeRows = rows.filter(r => {
-            const c = r.querySelectorAll("td");
-            if (c.length < 12) return false;
-            const strike = num(c[11].innerText);
-            return strike > 0;
-        });
-
-        if (validStrikeRows.length < 3) {
-            if (retry < 15) {
-                box.innerHTML = "Loading NSE data…";
-                setTimeout(() => renderHTMLBars(retry + 1), 500);
-            } else {
-                box.innerHTML = "NSE data delayed. Click refresh ⟳";
-            }
-            return;
-        }
-
         const data = getOptionData();
+
         if (!data.length) {
-            if (retry < 15) {
-                box.innerHTML = "Syncing option chain…";
-                setTimeout(() => renderHTMLBars(retry + 1), 500);
-            }
+            box.innerHTML = "NSE data not ready… click refresh again ⟳";
             return;
         }
 
@@ -164,35 +96,28 @@
         );
 
         box.innerHTML = data.map(d => `
-            <div style="margin-bottom:14px;
-                        border-bottom:1px dashed #ddd;
-                        padding-bottom:6px">
-
+            <div style="margin-bottom:14px;border-bottom:1px dashed #ddd">
                 <div style="font-weight:700;font-size:18px">
                     ${d.strike}
                 </div>
 
                 <div>
-                    <div style="width:${barW(d.ceOI,max)}px;
-                                height:10px;background:#ff3030"></div>
+                    <div style="width:${barW(d.ceOI,max)}px;height:10px;background:#ff3030"></div>
                     CE OI: ${d.ceOI}
                 </div>
 
                 <div>
-                    <div style="width:${barW(d.peOI,max)}px;
-                                height:10px;background:#16c784"></div>
+                    <div style="width:${barW(d.peOI,max)}px;height:10px;background:#16c784"></div>
                     PE OI: ${d.peOI}
                 </div>
 
                 <div>
-                    <div style="width:${barW(d.ceChg,max)}px;
-                                height:10px;background:#ffb300"></div>
+                    <div style="width:${barW(d.ceChg,max)}px;height:10px;background:#ffb300"></div>
                     CE Δ: ${d.ceChg}
                 </div>
 
                 <div>
-                    <div style="width:${barW(d.peChg,max)}px;
-                                height:10px;background:#0066ff"></div>
+                    <div style="width:${barW(d.peChg,max)}px;height:10px;background:#0066ff"></div>
                     PE Δ: ${d.peChg}
                 </div>
             </div>
@@ -200,52 +125,35 @@
     }
 
     /* ============================================================
-       TABLE MUTATION OBSERVER (DEBOUNCED)
+       🔥 HOOK NSE refreshOCPage (KEY FIX)
     ============================================================ */
-    function bindTableObserver() {
-        const tbody = document.querySelector("table tbody");
-        if (!tbody || tbody.__OI_OBS__) return;
+    function hookRefreshOCPage() {
+        if (!window.refreshOCPage || window.__OI_HOOKED__) return;
 
-        tbody.__OI_OBS__ = true;
-        let timer;
+        window.__OI_HOOKED__ = true;
 
-        new MutationObserver(() => {
-            clearTimeout(timer);
-            timer = setTimeout(() => renderHTMLBars(0), 500);
-        }).observe(tbody, { childList: true, subtree: true });
+        const original = window.refreshOCPage;
+
+        window.refreshOCPage = function (...args) {
+            const result = original.apply(this, args);
+
+            // NSE updates DOM AFTER this function
+            setTimeout(renderHTMLBars, 1200);
+
+            return result;
+        };
+
+        console.log("[OI Histogram] refreshOCPage hooked");
     }
 
     /* ============================================================
-       NSE REFRESH BUTTON FIX (ANCHOR BASED)
+       INIT – WAIT FOR NSE JS
     ============================================================ */
-    function bindNSERefreshButton() {
-        const a = document.querySelector("a[onclick*='refreshOCPage']");
-        if (!a || a.__OI_BOUND__) return;
-
-        a.__OI_BOUND__ = true;
-        a.addEventListener("click", () => {
-            setTimeout(() => renderHTMLBars(0), 1200);
-        });
-    }
-
-    /* ============================================================
-       GLOBAL DOM MONITOR
-    ============================================================ */
-    new MutationObserver(() => {
-        if (document.querySelector("table tbody")) {
-            bindTableObserver();
-            bindNSERefreshButton();
-            renderHTMLBars(0);
+    const init = setInterval(() => {
+        if (typeof window.refreshOCPage === "function") {
+            clearInterval(init);
+            hookRefreshOCPage();
         }
-    }).observe(document.body, { childList: true, subtree: true });
-
-    /* ============================================================
-       INIT
-    ============================================================ */
-    waitForTable(() => {
-        bindTableObserver();
-        bindNSERefreshButton();
-        renderHTMLBars(0);
-    });
+    }, 300);
 
 })();
