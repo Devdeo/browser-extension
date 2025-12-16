@@ -5,11 +5,14 @@
     if (window.__OI_HISTOGRAM_INIT__) return;
     window.__OI_HISTOGRAM_INIT__ = true;
 
-    let RENDER_LOCK = false;
     let TABLE_OBSERVER = null;
+    let TABLE_WATCHER = null;
+    let STABLE_TIMER = null;
+    let LAST_RENDER_HASH = "";
+    let LAST_INSTRUMENT = "";
 
     /* ===================== UTIL ===================== */
-    const num = v => parseInt(String(v).replace(/,/g, "")) || 0;
+    const num = v => parseInt(String(v || "").replace(/,/g, "")) || 0;
     const bw = (v, m) => Math.max(8, (v / m) * 250);
 
     /* ===================== WAIT TABLE ===================== */
@@ -20,7 +23,7 @@
                 clearInterval(t);
                 cb(tbody);
             }
-        }, 400);
+        }, 300);
     }
 
     /* ===================== DRAG ===================== */
@@ -48,6 +51,8 @@
 
     /* ===================== PANEL ===================== */
     function createPanel() {
+        if (document.getElementById("oiHistogramPanel")) return;
+
         const panel = document.createElement("div");
         panel.id = "oiHistogramPanel";
         panel.style.cssText = `
@@ -70,8 +75,9 @@
                     <span id="oiRefresh">As on: --</span>
                 </div>
             </div>
-            <div id="oiContainer" style="margin-top:10px;height:70vh;
-                overflow:auto;border:1px solid #ddd;border-radius:10px;padding:10px;">
+            <div id="oiContainer"
+                style="margin-top:10px;height:70vh;overflow:auto;
+                border:1px solid #ddd;border-radius:10px;padding:10px;">
             </div>
         `;
 
@@ -96,28 +102,30 @@
 
     /* ===================== DATA ===================== */
     function getData() {
-        const rows = [...document.querySelectorAll("table tbody tr")];
-        return rows.map(r => {
+        const rows = document.querySelectorAll("table tbody tr");
+        const out = [];
+
+        rows.forEach(r => {
             const c = r.querySelectorAll("td");
-            if (c.length < 22) return null;
-            return {
+            if (c.length < 22) return;
+            out.push({
                 strike: num(c[11].innerText),
                 ceOI: num(c[1].innerText),
                 ceChg: num(c[2].innerText),
                 peChg: num(c[20].innerText),
                 peOI: num(c[21].innerText)
-            };
-        }).filter(x => x && x.strike > 0);
+            });
+        });
+
+        return out.filter(x => x.strike > 0);
     }
 
     function getTotalsFromLastRow() {
-        const rows = [...document.querySelectorAll("table tbody tr")];
+        const rows = document.querySelectorAll("table tbody tr");
         if (!rows.length) return null;
         const c = rows[rows.length - 1].querySelectorAll("td");
-        return {
-            ce: num(c[1].innerText),
-            pe: num(c[21].innerText)
-        };
+        if (c.length < 22) return null;
+        return { ce: num(c[1].innerText), pe: num(c[21].innerText) };
     }
 
     /* ===================== HEADER ===================== */
@@ -131,20 +139,24 @@
         document.getElementById("oiTotals").innerText =
             `CE: ${t.ce.toLocaleString()} | PE: ${t.pe.toLocaleString()}`;
 
-        let asOn = "--";
         const ts = document.querySelector("#equity_timeStamp span:last-child");
-        if (ts) asOn = ts.innerText.trim();
-
-        document.getElementById("oiRefresh").innerText = `As on: ${asOn}`;
+        document.getElementById("oiRefresh").innerText =
+            `As on: ${ts ? ts.innerText.trim() : "--"}`;
     }
 
     /* ===================== DRAW ===================== */
-    function draw(data) {
+    function draw() {
+        const data = getData();
+        if (!data.length) return;
+
+        const hash = JSON.stringify(data.map(d => d.ceOI + "|" + d.peOI));
+        if (hash === LAST_RENDER_HASH) return;
+        LAST_RENDER_HASH = hash;
+
         const box = document.getElementById("oiContainer");
-        if (!box || !data.length) return;
+        updateHeader();
 
         data.sort((a, b) => b.strike - a.strike);
-        updateHeader();
 
         const max = Math.max(
             ...data.map(x => x.ceOI),
@@ -181,29 +193,17 @@
         if (row) row.scrollIntoView({ block: "center" });
     }
 
-    /* ===================== SAFE RENDER ===================== */
-    function safeRender() {
-        if (RENDER_LOCK) return;
-        const d = getData();
-        if (!d.length) return;
-
-        RENDER_LOCK = true;
-        draw(d);
-        setTimeout(() => RENDER_LOCK = false, 400);
+    /* ===================== STABLE RENDER ===================== */
+    function scheduleStableRender() {
+        clearTimeout(STABLE_TIMER);
+        STABLE_TIMER = setTimeout(draw, 300);
     }
 
     /* ===================== OBSERVER ===================== */
     function bindObserver(tbody) {
         if (TABLE_OBSERVER) TABLE_OBSERVER.disconnect();
 
-        let last = tbody.innerText;
-        TABLE_OBSERVER = new MutationObserver(() => {
-            if (tbody.innerText !== last) {
-                last = tbody.innerText;
-                safeRender();
-            }
-        });
-
+        TABLE_OBSERVER = new MutationObserver(scheduleStableRender);
         TABLE_OBSERVER.observe(tbody, {
             childList: true,
             subtree: true,
@@ -211,86 +211,55 @@
         });
     }
 
-    /* ===================== INSTRUMENT ===================== */
-    function getCurrentInstrument() {
-        const el = document.getElementById("equity_underlyingVal");
-        if (!el) return "nifty";
-        return el.innerText.trim().split(/\s+/)[0].toLowerCase();
-    }
-
-    /* ===================== NSE REFRESH ===================== */
-    function triggerNSERefresh() {
-        if (typeof window.refreshOCPage !== "function") return;
-        window.refreshOCPage(getCurrentInstrument());
-    }
-
     /* ===================== TABLE REPLACEMENT WATCH ===================== */
     function watchTableReplacement() {
-        let lastTable = document.querySelector("table");
+        let lastTable = null;
 
-        const obs = new MutationObserver(() => {
+        if (TABLE_WATCHER) TABLE_WATCHER.disconnect();
+
+        TABLE_WATCHER = new MutationObserver(() => {
             const table = document.querySelector("table");
             if (!table || table === lastTable) return;
 
             lastTable = table;
-            const tbody = table.querySelector("tbody");
-            if (!tbody) return;
-
-            bindObserver(tbody);
-            safeRender();
+            waitForTable(tbody => {
+                bindObserver(tbody);
+                scheduleStableRender();
+            });
         });
 
-        obs.observe(document.body, { childList: true, subtree: true });
+        TABLE_WATCHER.observe(document.body, { childList: true, subtree: true });
     }
 
-    /* ===================== INSTRUMENT CHANGE WATCH ===================== */
-    function watchInstrumentChange() {
-        let last = getCurrentInstrument();
+    /* ===================== INSTRUMENT WATCH ===================== */
+    function getInstrument() {
+        const el = document.getElementById("equity_underlyingVal");
+        return el ? el.innerText.split(/\s+/)[0] : "";
+    }
 
+    function watchInstrumentChange() {
         setInterval(() => {
-            const now = getCurrentInstrument();
-            if (now !== last) {
-                last = now;
+            const now = getInstrument();
+            if (now && now !== LAST_INSTRUMENT) {
+                LAST_INSTRUMENT = now;
                 waitForTable(tbody => {
                     bindObserver(tbody);
-                    safeRender();
+                    scheduleStableRender();
                 });
             }
-        }, 500);
+        }, 400);
     }
-
-    /* ===================== REFRESH ICON ===================== */
-    document.addEventListener("click", e => {
-        const btn = e.target.closest("a[onclick*='refreshOCPage']");
-        if (!btn) return;
-
-        const tbody = document.querySelector("table tbody");
-        if (!tbody) return;
-
-        const old = tbody.innerText;
-        let tries = 0;
-
-        triggerNSERefresh();
-
-        const t = setInterval(() => {
-            if (tbody.innerText !== old && tbody.innerText.trim()) {
-                clearInterval(t);
-                bindObserver(tbody);
-                safeRender();
-            }
-            if (++tries > 30) clearInterval(t);
-        }, 300);
-    }, true);
 
     /* ===================== INIT ===================== */
     createPanel();
 
     waitForTable(tbody => {
         bindObserver(tbody);
-        safeRender();
+        draw();
     });
 
     watchTableReplacement();
     watchInstrumentChange();
 
 })();
+        
