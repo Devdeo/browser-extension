@@ -9,7 +9,7 @@
     let TABLE_OBSERVER = null;
 
     /* ===================== UTIL ===================== */
-    const num = v => parseInt(v.replace(/,/g, "")) || 0;
+    const num = v => parseInt(String(v).replace(/,/g, "")) || 0;
     const bw = (v, m) => Math.max(8, (v / m) * 250);
 
     /* ===================== WAIT TABLE ===================== */
@@ -26,17 +26,20 @@
     /* ===================== DRAG ===================== */
     function makeDraggable(panel, header) {
         let d = false, ox = 0, oy = 0;
+
         header.addEventListener("mousedown", e => {
             d = true;
             ox = e.clientX - panel.offsetLeft;
             oy = e.clientY - panel.offsetTop;
             document.body.style.userSelect = "none";
         });
+
         document.addEventListener("mousemove", e => {
             if (!d) return;
             panel.style.left = (e.clientX - ox) + "px";
             panel.style.top = (e.clientY - oy) + "px";
         });
+
         document.addEventListener("mouseup", () => {
             d = false;
             document.body.style.userSelect = "auto";
@@ -59,15 +62,12 @@
                 padding:8px 12px;border-radius:12px;cursor:grab;">
                 <div style="display:flex;justify-content:space-between;">
                     <b>OI Histogram</b>
-                    <div>
-                        <span id="oiMin" style="cursor:pointer;margin-right:8px;">—</span>
-                        <span id="oiClose" style="cursor:pointer;">✖</span>
-                    </div>
+                    <span id="oiMin" style="cursor:pointer">—</span>
                 </div>
                 <div style="font-size:12px;margin-top:4px;">
                     <span id="oiPCR">PCR: --</span> |
                     <span id="oiTotals">CE: -- | PE: --</span><br>
-                    <span id="oiRefresh">Last Sync: --</span>
+                    <span id="oiRefresh">As on: --</span>
                 </div>
             </div>
             <div id="oiContainer" style="margin-top:10px;height:70vh;
@@ -80,7 +80,6 @@
         const header = document.getElementById("oiHeader");
         const box = document.getElementById("oiContainer");
         const minBtn = document.getElementById("oiMin");
-        const closeBtn = document.getElementById("oiClose");
 
         let min = false, fullH = null;
         setTimeout(() => fullH = panel.offsetHeight, 200);
@@ -92,7 +91,6 @@
             minBtn.innerText = min ? "+" : "—";
         };
 
-        closeBtn.onclick = () => panel.remove();
         makeDraggable(panel, header);
     }
 
@@ -116,7 +114,6 @@
         const rows = [...document.querySelectorAll("table tbody tr")];
         if (!rows.length) return null;
         const c = rows[rows.length - 1].querySelectorAll("td");
-        if (c.length < 22) return null;
         return {
             ce: num(c[1].innerText),
             pe: num(c[21].innerText)
@@ -124,31 +121,22 @@
     }
 
     /* ===================== HEADER ===================== */
-    /* ===================== HEADER ===================== */
-function updateHeader(data) {
-    const t = getTotalsFromLastRow();
-    if (!t) return;
+    function updateHeader() {
+        const t = getTotalsFromLastRow();
+        if (!t) return;
 
-    // PCR
-    document.getElementById("oiPCR").innerText =
-        `PCR: ${(t.pe / t.ce).toFixed(2)}`;
+        document.getElementById("oiPCR").innerText =
+            `PCR: ${(t.pe / t.ce).toFixed(2)}`;
 
-    // Totals
-    document.getElementById("oiTotals").innerText =
-        `CE: ${t.ce.toLocaleString()} | PE: ${t.pe.toLocaleString()}`;
+        document.getElementById("oiTotals").innerText =
+            `CE: ${t.ce.toLocaleString()} | PE: ${t.pe.toLocaleString()}`;
 
-    // ===== NSE OFFICIAL TIMESTAMP =====
-    let ts = "--";
-    const tsEl = document.querySelector("#equity_timeStamp span:last-child");
+        let asOn = "--";
+        const ts = document.querySelector("#equity_timeStamp span:last-child");
+        if (ts) asOn = ts.innerText.trim();
 
-    if (tsEl && tsEl.innerText.trim()) {
-        ts = tsEl.innerText.trim(); // "15-Dec-2025 15:30:00 IST"
+        document.getElementById("oiRefresh").innerText = `As on: ${asOn}`;
     }
-
-    document.getElementById("oiRefresh").innerText =
-        `As on: ${ts}`;
-}
-
 
     /* ===================== DRAW ===================== */
     function draw(data) {
@@ -156,7 +144,7 @@ function updateHeader(data) {
         if (!box || !data.length) return;
 
         data.sort((a, b) => b.strike - a.strike);
-        updateHeader(data);
+        updateHeader();
 
         const max = Math.max(
             ...data.map(x => x.ceOI),
@@ -167,12 +155,12 @@ function updateHeader(data) {
 
         box.innerHTML = data.map(r => `
             <div class="oiRow" data-strike="${r.strike}"
-                style="border-bottom:1px dashed #ddd;margin-bottom:12px;">
+                style="border-bottom:1px dashed #ddd;margin-bottom:10px">
                 <b>${r.strike}</b>
-                <div><div style="width:${bw(r.ceOI,max)}px;height:12px;background:#ff3030"></div>${r.ceOI}</div>
-                <div><div style="width:${bw(r.peOI,max)}px;height:12px;background:#16c784"></div>${r.peOI}</div>
-                <div><div style="width:${bw(r.ceChg,max)}px;height:12px;background:#ffb300"></div>${r.ceChg}</div>
-                <div><div style="width:${bw(r.peChg,max)}px;height:12px;background:#0066ff"></div>${r.peChg}</div>
+                <div><div style="width:${bw(r.ceOI,max)}px;height:10px;background:#ff3030"></div>${r.ceOI}</div>
+                <div><div style="width:${bw(r.peOI,max)}px;height:10px;background:#16c784"></div>${r.peOI}</div>
+                <div><div style="width:${bw(r.ceChg,max)}px;height:8px;background:#ffb300"></div>${r.ceChg}</div>
+                <div><div style="width:${bw(r.peChg,max)}px;height:8px;background:#0066ff"></div>${r.peChg}</div>
             </div>
         `).join("");
 
@@ -181,11 +169,10 @@ function updateHeader(data) {
 
     /* ===================== ATM ===================== */
     function centerATM(data) {
-        const spotEl = [...document.querySelectorAll("strong,span,b")]
-            .find(e => e.innerText.includes("Underlying"));
-        if (!spotEl) return;
+        const el = document.getElementById("equity_underlyingVal");
+        if (!el) return;
 
-        const spot = num(spotEl.innerText);
+        const spot = num(el.innerText);
         const atm = data.reduce((a, b) =>
             Math.abs(b.strike - spot) < Math.abs(a.strike - spot) ? b : a
         );
@@ -199,20 +186,20 @@ function updateHeader(data) {
         if (RENDER_LOCK) return;
         const d = getData();
         if (!d.length) return;
+
         RENDER_LOCK = true;
         draw(d);
         setTimeout(() => RENDER_LOCK = false, 400);
     }
 
-    /* ===================== AUTO SYNC ===================== */
+    /* ===================== OBSERVER ===================== */
     function bindObserver(tbody) {
         if (TABLE_OBSERVER) TABLE_OBSERVER.disconnect();
-        let last = tbody.innerText;
 
+        let last = tbody.innerText;
         TABLE_OBSERVER = new MutationObserver(() => {
-            const now = tbody.innerText;
-            if (now !== last) {
-                last = now;
+            if (tbody.innerText !== last) {
+                last = tbody.innerText;
                 safeRender();
             }
         });
@@ -223,45 +210,42 @@ function updateHeader(data) {
             characterData: true
         });
     }
-/* ===================== NSE AUTO SYNC (FINAL FIX) ===================== */
-function triggerNSEReload() {
-    if (typeof window.refreshOCPage === "function") {
-        window.refreshOCPage("equity"); // ✅ EXACT NSE CALL
+
+    /* ===================== INSTRUMENT ===================== */
+    function getCurrentInstrument() {
+        const el = document.getElementById("equity_underlyingVal");
+        if (!el) return "nifty";
+        return el.innerText.trim().split(/\s+/)[0].toLowerCase();
     }
-}
 
-/* Listen to manual refresh click */
-document.addEventListener("click", e => {
-    const btn = e.target.closest("a[onclick*='refreshOCPage']");
-    if (!btn) return;
+    /* ===================== NSE REFRESH ===================== */
+    function triggerNSERefresh() {
+        if (typeof window.refreshOCPage !== "function") return;
+        window.refreshOCPage(getCurrentInstrument());
+    }
 
-    // NSE will refresh itself, we just wait after
-    waitAfterNSERefresh();
-}, true);
+    /* ===================== REFRESH LISTENER ===================== */
+    document.addEventListener("click", e => {
+        const btn = e.target.closest("a[onclick*='refreshOCPage']");
+        if (!btn) return;
 
-/* Handle auto / manual refresh safely */
-function waitAfterNSERefresh() {
-    const tbody = document.querySelector("table tbody");
-    if (!tbody) return;
+        const tbody = document.querySelector("table tbody");
+        if (!tbody) return;
 
-    let oldText = tbody.innerText;
-    let tries = 0;
+        const old = tbody.innerText;
+        let tries = 0;
 
-    const check = setInterval(() => {
-        if (tbody.innerText !== oldText && tbody.innerText.trim().length > 0) {
-            clearInterval(check);
+        triggerNSERefresh();
 
-            bindObserver(tbody);   // attach observer AFTER update
-            safeRender();          // render once
-        }
-
-        // safety exit
-        if (++tries > 30) clearInterval(check);
-    }, 300);
-}
-
-
-
+        const t = setInterval(() => {
+            if (tbody.innerText !== old && tbody.innerText.trim()) {
+                clearInterval(t);
+                bindObserver(tbody);
+                safeRender();
+            }
+            if (++tries > 30) clearInterval(t);
+        }, 300);
+    }, true);
 
     /* ===================== INIT ===================== */
     createPanel();
