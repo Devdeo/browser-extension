@@ -173,18 +173,7 @@
     }
 
     /* ===================== ATM ===================== */
-    function centerATM(data) {
-        const el = document.getElementById("equity_underlyingVal");
-        if (!el) return;
-
-        const spot = num(el.innerText);
-        const atm = data.reduce((a, b) =>
-            Math.abs(b.strike - spot) < Math.abs(a.strike - spot) ? b : a
-        );
-
-        const row = document.querySelector(`.oiRow[data-strike="${atm.strike}"]`);
-        if (row) row.scrollIntoView({ block: "center" });
-    }
+    
 
     /* ===================== TIMESTAMP ===================== */
     function getTimestamp() {
