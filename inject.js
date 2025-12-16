@@ -224,36 +224,17 @@ function updateHeader(data) {
         });
     }
 
-    /* ===================== NSE REFRESH ===================== */
-    /* ===================== NSE REFRESH (SAFE AUTO SYNC) ===================== */
+/* ===================== NSE REFRESH (HARD SAFE FIX) ===================== */
 document.addEventListener("click", e => {
     const btn = e.target.closest("a[onclick*='refreshOCPage']");
     if (!btn) return;
 
-    // Let NSE refresh normally — DO NOT block
+    // Allow NSE JS to run first
     setTimeout(() => {
-        waitForTable(tbody => {
-
-            // Wait until NSE finishes loading
-            let tries = 0;
-            const waitData = setInterval(() => {
-                const rows = tbody.querySelectorAll("tr td");
-                if (rows.length > 0) {
-                    clearInterval(waitData);
-
-                    // Re-bind observer safely
-                    bindObserver(tbody);
-
-                    // Render once (no spam)
-                    safeRender();
-                }
-
-                // Hard safety exit
-                if (++tries > 20) clearInterval(waitData);
-            }, 300);
-        });
-    }, 1500);
+        location.reload(); // ✅ FULL SAFE RELOAD
+    }, 300);
 }, true);
+
 
 
     /* ===================== INIT ===================== */
