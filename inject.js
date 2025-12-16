@@ -77,9 +77,9 @@
 
         document.body.appendChild(panel);
 
-        const header = document.getElementById("oiHeader");
-        const box = document.getElementById("oiContainer");
-        const minBtn = document.getElementById("oiMin");
+        const header = panel.querySelector("#oiHeader");
+        const box = panel.querySelector("#oiContainer");
+        const minBtn = panel.querySelector("#oiMin");
 
         let min = false, fullH = null;
         setTimeout(() => fullH = panel.offsetHeight, 200);
@@ -224,7 +224,42 @@
         window.refreshOCPage(getCurrentInstrument());
     }
 
-    /* ===================== REFRESH LISTENER ===================== */
+    /* ===================== TABLE REPLACEMENT WATCH ===================== */
+    function watchTableReplacement() {
+        let lastTable = document.querySelector("table");
+
+        const obs = new MutationObserver(() => {
+            const table = document.querySelector("table");
+            if (!table || table === lastTable) return;
+
+            lastTable = table;
+            const tbody = table.querySelector("tbody");
+            if (!tbody) return;
+
+            bindObserver(tbody);
+            safeRender();
+        });
+
+        obs.observe(document.body, { childList: true, subtree: true });
+    }
+
+    /* ===================== INSTRUMENT CHANGE WATCH ===================== */
+    function watchInstrumentChange() {
+        let last = getCurrentInstrument();
+
+        setInterval(() => {
+            const now = getCurrentInstrument();
+            if (now !== last) {
+                last = now;
+                waitForTable(tbody => {
+                    bindObserver(tbody);
+                    safeRender();
+                });
+            }
+        }, 500);
+    }
+
+    /* ===================== REFRESH ICON ===================== */
     document.addEventListener("click", e => {
         const btn = e.target.closest("a[onclick*='refreshOCPage']");
         if (!btn) return;
@@ -249,9 +284,13 @@
 
     /* ===================== INIT ===================== */
     createPanel();
+
     waitForTable(tbody => {
         bindObserver(tbody);
         safeRender();
     });
+
+    watchTableReplacement();
+    watchInstrumentChange();
 
 })();
