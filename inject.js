@@ -223,17 +223,43 @@ function updateHeader(data) {
             characterData: true
         });
     }
+/* ===================== NSE AUTO SYNC (FINAL FIX) ===================== */
+function triggerNSEReload() {
+    if (typeof window.refreshOCPage === "function") {
+        window.refreshOCPage("equity"); // ✅ EXACT NSE CALL
+    }
+}
 
-/* ===================== NSE REFRESH (HARD SAFE FIX) ===================== */
+/* Listen to manual refresh click */
 document.addEventListener("click", e => {
     const btn = e.target.closest("a[onclick*='refreshOCPage']");
     if (!btn) return;
 
-    // Allow NSE JS to run first
-    setTimeout(() => {
-        location.reload(); // ✅ FULL SAFE RELOAD
-    }, 300);
+    // NSE will refresh itself, we just wait after
+    waitAfterNSERefresh();
 }, true);
+
+/* Handle auto / manual refresh safely */
+function waitAfterNSERefresh() {
+    const tbody = document.querySelector("table tbody");
+    if (!tbody) return;
+
+    let oldText = tbody.innerText;
+    let tries = 0;
+
+    const check = setInterval(() => {
+        if (tbody.innerText !== oldText && tbody.innerText.trim().length > 0) {
+            clearInterval(check);
+
+            bindObserver(tbody);   // attach observer AFTER update
+            safeRender();          // render once
+        }
+
+        // safety exit
+        if (++tries > 30) clearInterval(check);
+    }, 300);
+}
+
 
 
 
