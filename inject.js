@@ -124,19 +124,31 @@
     }
 
     /* ===================== HEADER ===================== */
-    function updateHeader(data) {
-        const t = getTotalsFromLastRow();
-        if (!t) return;
+    /* ===================== HEADER ===================== */
+function updateHeader(data) {
+    const t = getTotalsFromLastRow();
+    if (!t) return;
 
-        document.getElementById("oiPCR").innerText =
-            `PCR: ${(t.pe / t.ce).toFixed(2)}`;
+    // PCR
+    document.getElementById("oiPCR").innerText =
+        `PCR: ${(t.pe / t.ce).toFixed(2)}`;
 
-        document.getElementById("oiTotals").innerText =
-            `CE: ${t.ce.toLocaleString()} | PE: ${t.pe.toLocaleString()}`;
+    // Totals
+    document.getElementById("oiTotals").innerText =
+        `CE: ${t.ce.toLocaleString()} | PE: ${t.pe.toLocaleString()}`;
 
-        document.getElementById("oiRefresh").innerText =
-            `Last Sync: ${new Date().toLocaleTimeString()}`;
+    // ===== NSE OFFICIAL TIMESTAMP =====
+    let ts = "--";
+    const tsEl = document.querySelector("#equity_timeStamp span:last-child");
+
+    if (tsEl && tsEl.innerText.trim()) {
+        ts = tsEl.innerText.trim(); // "15-Dec-2025 15:30:00 IST"
     }
+
+    document.getElementById("oiRefresh").innerText =
+        `As on: ${ts}`;
+}
+
 
     /* ===================== DRAW ===================== */
     function draw(data) {
