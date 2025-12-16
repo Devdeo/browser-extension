@@ -225,14 +225,36 @@ function updateHeader(data) {
     }
 
     /* ===================== NSE REFRESH ===================== */
-    document.addEventListener("click", e => {
-        const a = e.target.closest("a[onclick*='refreshOCPage']");
-        if (!a) return;
-        setTimeout(() => waitForTable(tbody => {
-            bindObserver(tbody);
-            safeRender();
-        }), 1200);
-    }, true);
+    /* ===================== NSE REFRESH (SAFE AUTO SYNC) ===================== */
+document.addEventListener("click", e => {
+    const btn = e.target.closest("a[onclick*='refreshOCPage']");
+    if (!btn) return;
+
+    // Let NSE refresh normally — DO NOT block
+    setTimeout(() => {
+        waitForTable(tbody => {
+
+            // Wait until NSE finishes loading
+            let tries = 0;
+            const waitData = setInterval(() => {
+                const rows = tbody.querySelectorAll("tr td");
+                if (rows.length > 0) {
+                    clearInterval(waitData);
+
+                    // Re-bind observer safely
+                    bindObserver(tbody);
+
+                    // Render once (no spam)
+                    safeRender();
+                }
+
+                // Hard safety exit
+                if (++tries > 20) clearInterval(waitData);
+            }, 300);
+        });
+    }, 1500);
+}, true);
+
 
     /* ===================== INIT ===================== */
     createPanel();
